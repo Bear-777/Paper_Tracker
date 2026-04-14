@@ -1,0 +1,70 @@
+[
+  {
+    "id": "arxiv-quant-ph",
+    "label": "arXiv quant-ph",
+    "type": "arxiv",
+    "category": "quant-ph",
+    "rows": 120,
+    "enabled": true
+  },
+  {
+    "id": "prl",
+    "label": "PRL",
+    "type": "rss",
+    "url": "http://feeds.aps.org/rss/recent/prl.xml",
+    "fallbackCrossrefIssn": "0031-9007",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "pra",
+    "label": "PRA",
+    "type": "rss",
+    "url": "http://feeds.aps.org/rss/recent/pra.xml",
+    "fallbackCrossrefIssn": "2469-9926",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "nature-physics",
+    "label": "Nature Physics",
+    "type": "rss",
+    "url": "https://www.nature.com/nphys.rss",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "physical-review-research",
+    "label": "Physical Review Research",
+    "type": "rss",
+    "url": "http://feeds.aps.org/rss/recent/prresearch.xml",
+    "fallbackCrossrefIssn": "2643-1564",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "communications-physics",
+    "label": "Communications Physics",
+    "type": "rss",
+    "url": "https://www.nature.com/commsphys.rss",
+    "fallbackCrossrefIssn": "2399-3650",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "new-journal-of-physics",
+    "label": "New Journal of Physics",
+    "type": "crossref",
+    "issn": "1367-2630",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "journal-of-physics-a",
+    "label": "Journal of Physics A",
+    "type": "crossref",
+    "issn": "1751-8121",
+    "rows": 100,
+    "enabled": true
+  }
+]
