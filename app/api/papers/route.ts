@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getPaperCache } from "@/lib/cache";
+import { getAggregatedPapers } from "@/lib/cache";
 import { SOURCE_OPTIONS } from "@/lib/sources";
 import type { Paper } from "@/lib/types";
 
@@ -47,8 +47,8 @@ export async function GET(request: Request): Promise<NextResponse> {
   const query = searchParams.get("q")?.trim() ?? "";
   const searchField = parseSearchField(searchParams.get("field"));
   const sort = searchParams.get("sort") === "asc" ? "asc" : "desc";
-  const cache = await getPaperCache();
-  let papers = [...cache.papers];
+  const aggregated = await getAggregatedPapers();
+  let papers = [...aggregated.papers];
 
   if (sourceFilter) {
     papers = papers.filter((paper) => sourceFilter.has(paper.sourceId));
@@ -60,16 +60,30 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   papers.sort((left, right) => {
     const direction = sort === "asc" ? 1 : -1;
+    const publishedDiff = new Date(left.publishedAt).getTime() - new Date(right.publishedAt).getTime();
 
-    return direction * (new Date(left.publishedAt).getTime() - new Date(right.publishedAt).getTime());
+    if (publishedDiff !== 0) {
+      return direction * publishedDiff;
+    }
+
+    const sourceDiff = left.sourceLabel.localeCompare(right.sourceLabel);
+
+    if (sourceDiff !== 0) {
+      return sourceDiff;
+    }
+
+    return left.title.localeCompare(right.title);
   });
 
   return NextResponse.json({
-    updatedAt: cache.updatedAt,
+    updatedAt: aggregated.lastSuccessfulRefreshAt,
+    currentRefreshAttemptAt: aggregated.currentRefreshAttemptAt,
+    lastSuccessfulRefreshAt: aggregated.lastSuccessfulRefreshAt,
+    totalBeforeDedupe: aggregated.totalBeforeDedupe,
     total: papers.length,
     searchField,
     papers,
-    sourceErrors: cache.sourceErrors,
+    sourceViews: aggregated.sourceViews,
     sources: SOURCE_OPTIONS
   });
 }

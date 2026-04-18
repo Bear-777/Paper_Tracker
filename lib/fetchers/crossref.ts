@@ -1,4 +1,5 @@
 import { fetchJson } from "@/lib/http";
+import { SourceRequestError } from "@/lib/errors";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
 import { normalizeDoi, stripHtml, toIsoDate } from "@/lib/utils";
 
@@ -99,21 +100,17 @@ function toPaperFromCrossrefItem(item: CrossrefItem, sourceMeta: CrossrefSourceM
   const doi = normalizeDoi(item.DOI);
   const publishedAt = pickPublishedAt(item);
 
-  if (!title || !publishedAt) {
-    return null;
-  }
-
   const abstract = item.abstract ? stripHtml(item.abstract) : "";
   const url = item.URL || (doi ? `https://doi.org/${doi}` : "");
 
   return {
-    title,
+    title: title || "Untitled",
     authors: parseCrossrefAuthors(item.author),
     abstract,
     sourceId: sourceMeta.sourceId,
     sourceLabel: sourceMeta.sourceLabel,
     sourceType: sourceMeta.sourceType,
-    publishedAt,
+    publishedAt: publishedAt ?? new Date().toISOString(),
     doi,
     url
   };
@@ -134,7 +131,23 @@ export async function fetchCrossrefByIssn(options: CrossrefFetchOptions): Promis
     headers["User-Agent"] = `physics-paper-hub/0.1 (mailto:${mailto})`;
   }
 
-  const response = await fetchJson<CrossrefResponse>(endpoint, { headers });
+  let response: CrossrefResponse;
+
+  try {
+    response = await fetchJson<CrossrefResponse>(endpoint, { headers });
+  } catch (error) {
+    if (error instanceof SourceRequestError) {
+      throw error;
+    }
+
+    throw new SourceRequestError({
+      kind: "source_parsing_failed",
+      message: `Crossref response parsing failed: ${error instanceof Error ? error.message : String(error)}`,
+      url: endpoint,
+      cause: error
+    });
+  }
+
   const items = response.message?.items ?? [];
 
   return items
@@ -160,7 +173,22 @@ export async function fetchCrossrefByDoi(
     headers["User-Agent"] = `physics-paper-hub/0.1 (mailto:${mailto})`;
   }
 
-  const response = await fetchJson<CrossrefSingleResponse>(endpoint, { headers });
+  let response: CrossrefSingleResponse;
+
+  try {
+    response = await fetchJson<CrossrefSingleResponse>(endpoint, { headers });
+  } catch (error) {
+    if (error instanceof SourceRequestError) {
+      throw error;
+    }
+
+    throw new SourceRequestError({
+      kind: "source_parsing_failed",
+      message: `Crossref response parsing failed: ${error instanceof Error ? error.message : String(error)}`,
+      url: endpoint,
+      cause: error
+    });
+  }
 
   if (!response.message) {
     return null;

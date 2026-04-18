@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 
+import { SourceRequestError } from "@/lib/errors";
 import { fetchText } from "@/lib/http";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
 import { extractArxivId, normalizeDoi, normalizeWhitespace, stripHtml, toArray, toIsoDate, xmlValueToText } from "@/lib/utils";
@@ -34,10 +35,6 @@ function parseArxivEntry(entry: Record<string, unknown>, source: SourceConfig): 
   const abstract = normalizeWhitespace(xmlValueToText(entry.summary));
   const publishedAt = toIsoDate(xmlValueToText(entry.published) || xmlValueToText(entry.updated));
 
-  if (!title || !publishedAt) {
-    return null;
-  }
-
   const authors = toArray(entry.author as unknown[]).map((author) => {
     if (!author || typeof author !== "object") {
       return "";
@@ -51,13 +48,13 @@ function parseArxivEntry(entry: Record<string, unknown>, source: SourceConfig): 
   const url = pickArxivLink(entry.link, arxivId);
 
   return {
-    title,
+    title: title || "Untitled",
     authors: authors.filter(Boolean),
     abstract,
     sourceId: source.id,
     sourceLabel: source.label,
     sourceType: source.type,
-    publishedAt,
+    publishedAt: publishedAt ?? new Date().toISOString(),
     doi,
     arxivId,
     url
@@ -75,7 +72,19 @@ export async function fetchArxivPapers(source: SourceConfig): Promise<FetchedPap
 
   const url = `https://export.arxiv.org/api/query?${search.toString()}`;
   const xml = await fetchText(url);
-  const parsed = xmlParser.parse(xml) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = xmlParser.parse(xml) as Record<string, unknown>;
+  } catch (error) {
+    throw new SourceRequestError({
+      kind: "source_parsing_failed",
+      message: `arXiv feed parsing failed: ${error instanceof Error ? error.message : String(error)}`,
+      url,
+      cause: error
+    });
+  }
+
   const entries = toArray((parsed.feed as Record<string, unknown>)?.entry as unknown[]);
 
   return entries

@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 
+import { SourceRequestError } from "@/lib/errors";
 import { fetchText } from "@/lib/http";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
 import {
@@ -40,10 +41,6 @@ function parseRssItem(item: Record<string, unknown>, source: SourceConfig): Fetc
     xmlValueToText(item.pubDate) || xmlValueToText(item["dc:date"]) || xmlValueToText(item.updated)
   );
 
-  if (!title || !publishedAt) {
-    return null;
-  }
-
   const link = normalizeWhitespace(xmlValueToText(item.link) || xmlValueToText(item.guid));
   const doi =
     normalizeDoi(xmlValueToText(item["prism:doi"]) || xmlValueToText(item.doi)) ||
@@ -51,13 +48,13 @@ function parseRssItem(item: Record<string, unknown>, source: SourceConfig): Fetc
   const authors = parseAuthorList(item["dc:creator"] || item.author);
 
   return {
-    title,
+    title: title || "Untitled",
     authors,
     abstract,
     sourceId: source.id,
     sourceLabel: source.label,
     sourceType: source.type,
-    publishedAt,
+    publishedAt: publishedAt ?? new Date().toISOString(),
     doi,
     url: link || (doi ? `https://doi.org/${doi}` : "")
   };
@@ -69,10 +66,6 @@ function parseAtomItem(entry: Record<string, unknown>, source: SourceConfig): Fe
     xmlValueToText(entry.summary) || xmlValueToText(entry.content) || xmlValueToText(entry.description)
   );
   const publishedAt = toIsoDate(xmlValueToText(entry.published) || xmlValueToText(entry.updated));
-
-  if (!title || !publishedAt) {
-    return null;
-  }
 
   const links = toArray(entry.link as unknown[]);
   let link = "";
@@ -102,13 +95,13 @@ function parseAtomItem(entry: Record<string, unknown>, source: SourceConfig): Fe
   });
 
   return {
-    title,
+    title: title || "Untitled",
     authors: authors.filter(Boolean),
     abstract,
     sourceId: source.id,
     sourceLabel: source.label,
     sourceType: source.type,
-    publishedAt,
+    publishedAt: publishedAt ?? new Date().toISOString(),
     doi,
     url: link || (doi ? `https://doi.org/${doi}` : "")
   };
@@ -120,7 +113,18 @@ export async function fetchRssPapers(source: SourceConfig): Promise<FetchedPaper
   }
 
   const xml = await fetchText(source.url);
-  const parsed = xmlParser.parse(xml) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+
+  try {
+    parsed = xmlParser.parse(xml) as Record<string, unknown>;
+  } catch (error) {
+    throw new SourceRequestError({
+      kind: "source_parsing_failed",
+      message: `RSS parsing failed: ${error instanceof Error ? error.message : String(error)}`,
+      url: source.url,
+      cause: error
+    });
+  }
 
   const rssItems = toArray(
     ((parsed.rss as Record<string, unknown>)?.channel as Record<string, unknown>)?.item as unknown[]

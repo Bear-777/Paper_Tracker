@@ -1,17 +1,19 @@
 import PaperDashboard from "@/components/paper-dashboard";
-import { getPaperCache } from "@/lib/cache";
+import { getAggregatedPapers } from "@/lib/cache";
 import { SOURCE_OPTIONS } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage(): Promise<JSX.Element> {
-  const cache = await getPaperCache();
+  const aggregated = await getAggregatedPapers();
 
   return (
     <PaperDashboard
-      initialPapers={cache.papers}
-      initialUpdatedAt={cache.updatedAt}
-      initialSourceErrors={cache.sourceErrors}
+      initialPapers={aggregated.papers}
+      initialUpdatedAt={aggregated.lastSuccessfulRefreshAt ?? ""}
+      initialCurrentRefreshAttemptAt={aggregated.currentRefreshAttemptAt ?? ""}
+      initialSourceViews={aggregated.sourceViews}
+      initialTotalBeforeDedupe={aggregated.totalBeforeDedupe}
       sources={SOURCE_OPTIONS}
     />
   );

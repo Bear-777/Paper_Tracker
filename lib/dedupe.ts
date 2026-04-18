@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import type { FetchedPaper, Paper } from "@/lib/types";
-import { normalizeDoi, normalizeWhitespace } from "@/lib/utils";
+import { canonicalizeUrl, normalizeDoi, normalizeTitleForDedupe, normalizeWhitespace } from "@/lib/utils";
 
 function normalizeAuthor(author: string | undefined): string {
   if (!author) {
@@ -26,10 +26,16 @@ function dedupeKey(paper: FetchedPaper): string {
     return `arxiv:${paper.arxivId.toLowerCase()}`;
   }
 
-  const firstAuthor = normalizeAuthor(paper.authors[0]);
-  const day = paper.publishedAt.slice(0, 10);
+  const canonicalUrl = canonicalizeUrl(paper.url);
 
-  return `title:${normalizeTitle(paper.title)}|author:${firstAuthor}|day:${day}`;
+  if (canonicalUrl) {
+    return `url:${canonicalUrl}`;
+  }
+
+  const firstAuthor = normalizeAuthor(paper.authors[0]);
+  const normalizedTitle = normalizeTitleForDedupe(paper.title) || normalizeTitle(paper.title);
+
+  return `title:${normalizedTitle}|author:${firstAuthor}`;
 }
 
 function qualityScore(paper: FetchedPaper): number {
@@ -70,9 +76,18 @@ function pickBetterPaper(current: FetchedPaper, candidate: FetchedPaper): Fetche
     return current;
   }
 
-  return new Date(candidate.publishedAt).getTime() > new Date(current.publishedAt).getTime()
-    ? candidate
-    : current;
+  const candidateTime = new Date(candidate.publishedAt).getTime();
+  const currentTime = new Date(current.publishedAt).getTime();
+
+  if (candidateTime !== currentTime) {
+    return candidateTime > currentTime ? candidate : current;
+  }
+
+  if (candidate.sourceLabel !== current.sourceLabel) {
+    return candidate.sourceLabel.localeCompare(current.sourceLabel) < 0 ? candidate : current;
+  }
+
+  return candidate.title.localeCompare(current.title) < 0 ? candidate : current;
 }
 
 function buildStableId(key: string): string {
@@ -94,8 +109,24 @@ export function dedupePapers(papers: FetchedPaper[]): Paper[] {
     map.set(key, pickBetterPaper(existing, paper));
   }
 
-  return Array.from(map.entries()).map(([key, paper]) => ({
-    ...paper,
-    id: buildStableId(key)
-  }));
+  return Array.from(map.entries())
+    .map(([key, paper]) => ({
+      ...paper,
+      id: buildStableId(key)
+    }))
+    .sort((left, right) => {
+      const publishedDiff = new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime();
+
+      if (publishedDiff !== 0) {
+        return publishedDiff;
+      }
+
+      const sourceDiff = left.sourceLabel.localeCompare(right.sourceLabel);
+
+      if (sourceDiff !== 0) {
+        return sourceDiff;
+      }
+
+      return left.title.localeCompare(right.title);
+    });
 }

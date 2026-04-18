@@ -2,9 +2,12 @@ import type { FetchedPaper, SourceConfig } from "@/lib/types";
 
 import { fetchArxivPapers } from "@/lib/fetchers/arxiv";
 import { fetchCrossrefByDoi, fetchCrossrefByIssn, fetchCrossrefPapers } from "@/lib/fetchers/crossref";
+import { resolveToCanonicalDoi } from "@/lib/fetchers/doi-resolver";
 import { fetchOpenAlexByDoi, type OpenAlexMetadata } from "@/lib/fetchers/openalex";
 import { fetchRssPapers } from "@/lib/fetchers/rss";
-import { hasMarkupArtifacts, normalizeDoi, normalizeTitleForMatch, stripHtml } from "@/lib/utils";
+import { hasMarkupArtifacts, isLikelyShortDoi, normalizeDoi, normalizeTitleForMatch, stripHtml } from "@/lib/utils";
+
+const METADATA_ENRICH_CONCURRENCY = Number(process.env.METADATA_ENRICH_CONCURRENCY ?? 3);
 
 interface DoiMetadataBundle {
   crossref: FetchedPaper | null;
@@ -25,18 +28,6 @@ function hasUsableAbstract(abstractText: string): boolean {
 
 function needsTitleCleanup(title: string): boolean {
   return hasMarkupArtifacts(title) || title.length > 220;
-}
-
-function isLikelyShortDoi(doi: string | undefined): boolean {
-  const normalized = normalizeDoi(doi);
-
-  if (!normalized) {
-    return false;
-  }
-
-  const suffix = normalized.split("/")[1] ?? "";
-
-  return suffix.length <= 12 || /^[a-z0-9]{3,6}-[a-z0-9]{3,6}$/i.test(suffix);
 }
 
 function mergePaperWithBundle(paper: FetchedPaper, bundle: DoiMetadataBundle | undefined): FetchedPaper {
@@ -200,7 +191,9 @@ async function enrichMissingMetadataByDoi(source: SourceConfig, papers: FetchedP
     }));
   }
 
-  const lookupResults = await mapWithConcurrency(candidateDois, 6, async (doi) => {
+  const lookupResults = await mapWithConcurrency(candidateDois, METADATA_ENRICH_CONCURRENCY, async (doi) => {
+    const canonicalDoi = isLikelyShortDoi(doi) ? await resolveToCanonicalDoi(doi) : doi;
+    const lookupDoi = normalizeDoi(canonicalDoi) ?? doi;
     const sourceMeta = {
       sourceId: source.id,
       sourceLabel: source.label,
@@ -210,7 +203,7 @@ async function enrichMissingMetadataByDoi(source: SourceConfig, papers: FetchedP
     let fromOpenAlex: OpenAlexMetadata | null = null;
 
     try {
-      fromCrossref = await fetchCrossrefByDoi(doi, sourceMeta);
+      fromCrossref = await fetchCrossrefByDoi(lookupDoi, sourceMeta);
     } catch {
       fromCrossref = null;
     }
@@ -220,7 +213,7 @@ async function enrichMissingMetadataByDoi(source: SourceConfig, papers: FetchedP
 
     if (stillMissing) {
       try {
-        fromOpenAlex = await fetchOpenAlexByDoi(doi);
+        fromOpenAlex = await fetchOpenAlexByDoi(lookupDoi);
       } catch {
         fromOpenAlex = null;
       }

@@ -1,4 +1,5 @@
-import { fetchWithTimeout } from "@/lib/http";
+import { SourceRequestError } from "@/lib/errors";
+import { fetchWithRetry } from "@/lib/http";
 import { normalizeDoi, stripHtml } from "@/lib/utils";
 
 interface OpenAlexAuthorship {
@@ -75,11 +76,26 @@ export async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexMetadata 
   const endpoint =
     `https://api.openalex.org/works/${encodeURIComponent(`https://doi.org/${queryDoi}`)}` +
     (querySuffix ? `?${querySuffix}` : "");
-  const response = await fetchWithTimeout(endpoint, {
-    headers: {
-      Accept: "application/json"
+  let response: Response;
+
+  try {
+    response = await fetchWithRetry(endpoint, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+  } catch (error) {
+    if (error instanceof SourceRequestError) {
+      throw error;
     }
-  });
+
+    throw new SourceRequestError({
+      kind: "source_fetch_failed",
+      message: `OpenAlex fetch failed: ${error instanceof Error ? error.message : String(error)}`,
+      url: endpoint,
+      cause: error
+    });
+  }
 
   if (response.status === 404) {
     return null;
@@ -89,7 +105,18 @@ export async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexMetadata 
     throw new Error(`OpenAlex fetch failed (${response.status}) for DOI ${queryDoi}`);
   }
 
-  const work = (await response.json()) as OpenAlexWork;
+  let work: OpenAlexWork;
+
+  try {
+    work = (await response.json()) as OpenAlexWork;
+  } catch (error) {
+    throw new SourceRequestError({
+      kind: "source_parsing_failed",
+      message: `OpenAlex response parsing failed: ${error instanceof Error ? error.message : String(error)}`,
+      url: endpoint,
+      cause: error
+    });
+  }
   const authors =
     work.authorships
       ?.map((item) => item.author?.display_name?.trim() ?? "")

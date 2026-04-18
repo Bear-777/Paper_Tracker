@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import type { Paper, SourceError } from "@/lib/types";
+import type { Paper, SourceView } from "@/lib/types";
 
 type SortOrder = "desc" | "asc";
 type SearchScope = "all" | "title" | "authors" | "abstract";
@@ -15,7 +15,9 @@ interface SourceOption {
 interface PaperDashboardProps {
   initialPapers: Paper[];
   initialUpdatedAt: string;
-  initialSourceErrors: SourceError[];
+  initialCurrentRefreshAttemptAt: string;
+  initialSourceViews: SourceView[];
+  initialTotalBeforeDedupe: number;
   sources: SourceOption[];
 }
 
@@ -52,11 +54,86 @@ function pickIdentifier(paper: Paper): { label: string; value: string; href: str
   return null;
 }
 
+function getMissingFields(paper: Paper): string[] {
+  const missing: string[] = [];
+
+  if (!paper.authors || paper.authors.length === 0) {
+    missing.push("authors");
+  }
+
+  if (!paper.abstract || paper.abstract.trim().length === 0) {
+    missing.push("abstract");
+  }
+
+  if (!paper.doi && !paper.arxivId) {
+    missing.push("identifier");
+  }
+
+  return missing;
+}
+
+function sourceStatusLabel(source: SourceView): string {
+  if (source.sourceStatus === "stale_cache") {
+    return "stale cache";
+  }
+
+  if (source.sourceStatus === "failed_no_cache") {
+    return "failed no cache";
+  }
+
+  if (source.sourceStatus === "partial_data") {
+    return "partial data";
+  }
+
+  return "success";
+}
+
+function errorKindLabel(kind: string | undefined): string {
+  if (kind === "source_fetch_failed") {
+    return "source fetch failed";
+  }
+
+  if (kind === "source_returned_empty") {
+    return "no new articles in window";
+  }
+
+  if (kind === "source_parsing_failed") {
+    return "source parsing failed";
+  }
+
+  if (kind === "source_temporarily_unavailable") {
+    return "source temporarily unavailable";
+  }
+
+  return kind ?? "unknown";
+}
+
+function dataModeLabel(source: SourceView): string {
+  if (source.sourceStatus === "failed_no_cache") {
+    return "no data";
+  }
+
+  if (source.usingStaleCache) {
+    return "stale cache";
+  }
+
+  return "fresh data";
+}
+
 export default function PaperDashboard(props: PaperDashboardProps): JSX.Element {
-  const { initialPapers, initialUpdatedAt, initialSourceErrors, sources } = props;
+  const {
+    initialPapers,
+    initialUpdatedAt,
+    initialCurrentRefreshAttemptAt,
+    initialSourceViews,
+    initialTotalBeforeDedupe,
+    sources
+  } = props;
   const [papers, setPapers] = useState<Paper[]>(initialPapers);
-  const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
-  const [sourceErrors, setSourceErrors] = useState<SourceError[]>(initialSourceErrors);
+  const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState(initialUpdatedAt);
+  const [currentRefreshAttemptAt, setCurrentRefreshAttemptAt] = useState(initialCurrentRefreshAttemptAt);
+  const [sourceViews, setSourceViews] = useState<SourceView[]>(initialSourceViews);
+  const [totalBeforeDedupe, setTotalBeforeDedupe] = useState(initialTotalBeforeDedupe);
   const [query, setQuery] = useState("");
   const [searchScope, setSearchScope] = useState<SearchScope>("all");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -87,8 +164,19 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       })
       .sort((left, right) => {
         const direction = sortOrder === "asc" ? 1 : -1;
+        const publishedDiff = new Date(left.publishedAt).getTime() - new Date(right.publishedAt).getTime();
 
-        return direction * (new Date(left.publishedAt).getTime() - new Date(right.publishedAt).getTime());
+        if (publishedDiff !== 0) {
+          return direction * publishedDiff;
+        }
+
+        const sourceDiff = left.sourceLabel.localeCompare(right.sourceLabel);
+
+        if (sourceDiff !== 0) {
+          return sourceDiff;
+        }
+
+        return left.title.localeCompare(right.title);
       });
   }, [papers, query, searchScope, selectedSourceIds, sortOrder]);
 
@@ -117,7 +205,10 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       const payload = (await response.json()) as {
         papers?: Paper[];
         updatedAt?: string;
-        sourceErrors?: SourceError[];
+        currentRefreshAttemptAt?: string;
+        lastSuccessfulRefreshAt?: string;
+        sourceViews?: SourceView[];
+        totalBeforeDedupe?: number;
         error?: string;
       };
 
@@ -127,8 +218,10 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       }
 
       setPapers(payload.papers ?? []);
-      setUpdatedAt(payload.updatedAt ?? new Date().toISOString());
-      setSourceErrors(payload.sourceErrors ?? []);
+      setLastSuccessfulRefreshAt(payload.lastSuccessfulRefreshAt ?? payload.updatedAt ?? new Date().toISOString());
+      setCurrentRefreshAttemptAt(payload.currentRefreshAttemptAt ?? new Date().toISOString());
+      setSourceViews(payload.sourceViews ?? []);
+      setTotalBeforeDedupe(payload.totalBeforeDedupe ?? payload.papers?.length ?? 0);
       setStatusText("Data refreshed.");
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : "Refresh failed.");
@@ -136,6 +229,18 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       setIsRefreshing(false);
     }
   }
+
+  const warningSources = useMemo(
+    () =>
+      sourceViews.filter((source) => {
+        if (source.sourceStatus !== "stale_cache" && source.sourceStatus !== "failed_no_cache") {
+          return false;
+        }
+
+        return source.lastError?.kind !== "source_returned_empty";
+      }),
+    [sourceViews]
+  );
 
   return (
     <main className="page-shell">
@@ -183,9 +288,10 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
         </div>
 
         <div className="controls-row info-row">
-          <p>Last updated: {formatDate(updatedAt)}</p>
+          <p>Last successful refresh: {lastSuccessfulRefreshAt ? formatDate(lastSuccessfulRefreshAt) : "N/A"}</p>
+          <p>Current refresh attempt: {currentRefreshAttemptAt ? formatDate(currentRefreshAttemptAt) : "N/A"}</p>
           <p>
-            Showing {filteredPapers.length} / {papers.length} papers
+            Showing {filteredPapers.length} / {papers.length} papers (raw: {totalBeforeDedupe})
           </p>
           {statusText ? <p>{statusText}</p> : null}
         </div>
@@ -213,13 +319,32 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
         </fieldset>
       </section>
 
-      {sourceErrors.length > 0 ? (
+      <section className="card status-card">
+        <h2>Source status</h2>
+        <div className="status-grid">
+          {sourceViews.map((source) => (
+            <article key={source.sourceId} className="status-item">
+              <p>
+                <strong>{source.sourceLabel}</strong>
+              </p>
+              <p>Status: {sourceStatusLabel(source)}</p>
+              <p>Data mode: {dataModeLabel(source)}</p>
+              <p>Articles: {source.articleCount}</p>
+              <p>Last success: {source.lastSuccessAt ? formatDate(source.lastSuccessAt) : "N/A"}</p>
+              <p>Last attempt: {source.lastAttemptAt ? formatDate(source.lastAttemptAt) : "N/A"}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {warningSources.length > 0 ? (
         <section className="card warning-card">
-          <h2>Source fetch warnings</h2>
+          <h2>Source warnings</h2>
           <ul>
-            {sourceErrors.map((error) => (
-              <li key={`${error.sourceId}-${error.message}`}>
-                <strong>{error.sourceLabel}:</strong> {error.message}
+            {warningSources.map((source) => (
+              <li key={`${source.sourceId}-${source.lastError?.message ?? "no-error-message"}`}>
+                <strong>{source.sourceLabel}</strong>: {errorKindLabel(source.lastError?.kind)} -{" "}
+                {source.lastError?.message ?? "No additional detail"}
               </li>
             ))}
           </ul>
@@ -229,6 +354,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       <section className="paper-list">
         {filteredPapers.map((paper) => {
           const identifier = pickIdentifier(paper);
+          const missingFields = getMissingFields(paper);
 
           return (
             <article key={paper.id} className="paper-card card">
@@ -244,8 +370,14 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                 </p>
               </header>
 
-              <p className="authors">{paper.authors.length > 0 ? paper.authors.join(", ") : "Authors unavailable"}</p>
-              <p className="abstract">{paper.abstract || "No abstract available."}</p>
+              <p className="authors">
+                {paper.authors.length > 0
+                  ? paper.authors.join(", ")
+                  : "Authors unavailable (upstream source metadata did not provide authors)."}
+              </p>
+              <p className="abstract">
+                {paper.abstract || "Abstract unavailable (upstream source metadata did not provide abstract)."}
+              </p>
 
               {identifier ? (
                 <p className="identifier">
@@ -253,6 +385,14 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                   <a href={identifier.href} target="_blank" rel="noreferrer">
                     {identifier.value}
                   </a>
+                </p>
+              ) : (
+                <p className="identifier">Identifier unavailable (upstream source metadata missing DOI/arXiv ID).</p>
+              )}
+
+              {missingFields.length > 0 ? (
+                <p className="missing-hint">
+                  Missing metadata: {missingFields.join(", ")} (from source feeds/APIs, not local filtering error).
                 </p>
               ) : null}
             </article>

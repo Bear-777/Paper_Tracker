@@ -137,6 +137,41 @@ export function normalizeDoi(doi: string | undefined): string | undefined {
   return normalized || undefined;
 }
 
+export function isLikelyShortDoi(doi: string | undefined): boolean {
+  const normalized = normalizeDoi(doi);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const suffix = normalized.split("/")[1] ?? "";
+
+  return suffix.length <= 14 || /^[a-z0-9]{2,8}-[a-z0-9]{2,8}$/i.test(suffix);
+}
+
+export function canonicalizeUrl(input: string | undefined): string | undefined {
+  if (!input) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(input);
+
+    url.hash = "";
+    url.search = "";
+
+    let normalized = url.toString();
+
+    if (normalized.endsWith("/")) {
+      normalized = normalized.slice(0, -1);
+    }
+
+    return normalized.toLowerCase();
+  } catch {
+    return normalizeWhitespace(input).toLowerCase() || undefined;
+  }
+}
+
 export function extractDoi(text: string): string | undefined {
   const match = text.match(/\b10\.\d{4,9}\/[-._;()/:a-z0-9]+\b/i);
 
@@ -171,26 +206,41 @@ export function toIsoDate(value: string | number | Date | undefined): string | u
   return date.toISOString();
 }
 
-export function isWithinLast7Days(isoDate: string, nowMs: number = Date.now()): boolean {
+export function getUtcWindowStartMs(refreshTimestampMs: number): number {
+  const refreshDate = new Date(refreshTimestampMs);
+  const utcStart = Date.UTC(
+    refreshDate.getUTCFullYear(),
+    refreshDate.getUTCMonth(),
+    refreshDate.getUTCDate(),
+    0,
+    0,
+    0,
+    0
+  );
+
+  return utcStart - 6 * 24 * 60 * 60 * 1000;
+}
+
+export function isWithinLast7Days(isoDate: string, refreshTimestampMs: number): boolean {
   const targetDate = new Date(isoDate);
 
   if (Number.isNaN(targetDate.getTime())) {
     return false;
   }
 
-  const now = new Date(nowMs);
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  start.setUTCDate(start.getUTCDate() - 6);
+  const startMs = getUtcWindowStartMs(refreshTimestampMs);
 
-  return targetDate.getTime() >= start.getTime();
+  return targetDate.getTime() >= startMs && targetDate.getTime() <= refreshTimestampMs;
 }
 
-export function buildFromDate(nowMs: number = Date.now()): string {
-  const now = new Date(nowMs);
-  const fromDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  fromDate.setUTCDate(fromDate.getUTCDate() - 6);
+export function buildFromDate(refreshTimestampMs: number): string {
+  const fromDate = new Date(getUtcWindowStartMs(refreshTimestampMs));
 
   return fromDate.toISOString().slice(0, 10);
+}
+
+export function normalizeTitleForDedupe(title: string): string {
+  return normalizeWhitespace(stripHtml(title).toLowerCase().replace(/[^a-z0-9\s]/g, " "));
 }
 
 export function toErrorMessage(error: unknown): string {

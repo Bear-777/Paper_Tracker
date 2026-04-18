@@ -22,9 +22,13 @@ A public-ready paper aggregation website focused on the most recent 7 days of se
 - Sort by publication time.
 - Each paper includes title, authors, abstract, source, publication date, and DOI/arXiv identifier.
 - Server-side refresh endpoint to pull and cache data.
+- Source-level independent cache with soft refresh (failed source keeps previous successful cache).
+- Source status visibility: `success`, `stale cache`, `failed no cache`, `partial data`.
 - Fetching logic is modularized and configured by `sources.json`.
 - De-duplication removes duplicated papers across journal/Crossref copies.
 - DOI-based metadata enrichment (Crossref + OpenAlex) fills missing abstracts/authors and cleans malformed titles.
+- APS short DOI canonicalization is supported before enrichment (improves PRL/PRA metadata completion).
+- Missing metadata fields are explicitly labeled in the UI when upstream sources do not provide them.
 
 ## Project Structure
 
@@ -99,6 +103,11 @@ Variables:
 - `OPENALEX_MAILTO`: optional; used for OpenAlex DOI-based metadata enrichment.
 - `CACHE_TTL_MS`: server cache TTL in milliseconds.
 - `REQUEST_TIMEOUT_MS`: per-source request timeout.
+- `REQUEST_MAX_RETRIES`: retry count for retryable failures.
+- `REQUEST_BACKOFF_BASE_MS`: exponential backoff base milliseconds.
+- `REQUEST_USER_AGENT`: explicit User-Agent for external requests.
+- `SOURCE_REFRESH_CONCURRENCY`: source refresh concurrency.
+- `METADATA_ENRICH_CONCURRENCY`: DOI enrichment concurrency for Crossref/OpenAlex lookups.
 - `REFRESH_TOKEN`: optional bearer token for protecting `POST /api/refresh`.
 
 ## Source Configuration (`sources.json`)
@@ -134,8 +143,12 @@ Optional for RSS:
     - `q=quantum error correction`
     - `field=all|title|authors|abstract`
     - `sort=desc|asc`
+  - Response includes:
+    - `sourceViews` (each source status + cache freshness)
+    - `lastSuccessfulRefreshAt`
+    - `currentRefreshAttemptAt`
 - `POST /api/refresh`
-  - Refreshes data server-side and updates cache.
+  - Soft refreshes each source independently and updates only successful sources.
   - If `REFRESH_TOKEN` is set, include header:
     - `Authorization: Bearer <REFRESH_TOKEN>`
 
@@ -167,5 +180,6 @@ If duplicates are found, non-Crossref entries are preferred over Crossref entrie
 ## Notes
 
 - Time filtering is unified to the latest 7 days.
+- Time filtering is based on a single UTC refresh timestamp for consistency across all sources.
 - The app intentionally avoids scraping HTML pages directly and prioritizes official APIs/RSS.
 - On serverless environments, memory cache is warm-instance scoped (restarts clear cache), and `POST /api/refresh` can repopulate it on demand.

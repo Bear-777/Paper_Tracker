@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { refreshPaperCache } from "@/lib/cache";
+import { refreshAndGetAggregatedPapers } from "@/lib/cache";
 import { SOURCE_OPTIONS } from "@/lib/sources";
 
 export const runtime = "nodejs";
@@ -22,13 +22,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const cache = await refreshPaperCache();
+  const aggregated = await refreshAndGetAggregatedPapers();
 
   return NextResponse.json({
-    updatedAt: cache.updatedAt,
-    total: cache.papers.length,
-    papers: cache.papers,
-    sourceErrors: cache.sourceErrors,
+    updatedAt: aggregated.lastSuccessfulRefreshAt,
+    currentRefreshAttemptAt: aggregated.currentRefreshAttemptAt,
+    lastSuccessfulRefreshAt: aggregated.lastSuccessfulRefreshAt,
+    totalBeforeDedupe: aggregated.totalBeforeDedupe,
+    total: aggregated.papers.length,
+    papers: aggregated.papers,
+    sourceViews: aggregated.sourceViews,
     sources: SOURCE_OPTIONS
   });
 }
