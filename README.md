@@ -1,84 +1,108 @@
-# Physics Papers Hub (Next.js + TypeScript)
+﻿# Physics Papers Hub (Next.js + TypeScript)
 
-A public-ready paper aggregation website focused on the most recent 7 days of selected physics sources.
+A public-ready physics paper aggregation site focused on a consistent UTC 7-day window across arXiv and selected journals.
 
-## Features
+## Core Features
 
-- Home page lists papers from the last 7 days.
-- Data sources:
-  - arXiv via official API (`export.arxiv.org/api/query`)
+- Home page shows papers from the latest 7-day UTC window.
+- Multi-source ingestion (official APIs/RSS first):
+  - arXiv API (`export.arxiv.org/api/query`)
   - Journal RSS feeds
-  - Crossref REST API fallback for sources configured as `crossref`
-- Source filters:
+  - Crossref REST fallback by ISSN when configured
+- Source filter (checkboxes):
+  - arXiv quant-ph
   - PRL
   - PRA
   - Nature Physics
-  - arXiv quant-ph
   - Physical Review Research
   - Communications Physics
   - New Journal of Physics
   - Journal of Physics A
-- Keyword search over title, abstract, and authors.
-- Sort by publication time.
-- Each paper includes title, authors, abstract, source, publication date, and DOI/arXiv identifier.
-- Server-side refresh endpoint to pull and cache data.
-- Source-level independent cache with soft refresh (failed source keeps previous successful cache).
-- Source status visibility: `success`, `stale cache`, `failed no cache`, `partial data`.
-- Fetching logic is modularized and configured by `sources.json`.
-- De-duplication removes duplicated papers across journal/Crossref copies.
-- DOI-based metadata enrichment (Crossref + OpenAlex) fills missing abstracts/authors and cleans malformed titles.
-- APS short DOI canonicalization is supported before enrichment (improves PRL/PRA metadata completion).
-- Missing metadata fields are explicitly labeled in the UI when upstream sources do not provide them.
+- Keyword search scope selector:
+  - Title + authors + abstract
+  - Title only
+  - Authors only
+  - Abstract only
+- Sort by publication time (newest/oldest).
+- Each paper card shows title, authors, abstract, source, date, DOI/arXiv ID, and missing metadata hints.
+- `POST /api/refresh` soft refresh with source-level independent cache.
+- Source status panel:
+  - `success`
+  - `stale cache`
+  - `failed no cache`
+  - `partial data`
+- Stable dedupe + stable sorting.
+
+## Latest Stability Improvements
+
+- Source-level independent cache (`articles`, `lastSuccessAt`, `lastAttemptAt`, `lastError`, `sourceStatus`).
+- Soft refresh: failed source keeps previous successful data.
+- Request timeout/retry/backoff/concurrency/User-Agent.
+- Unified UTC refresh timestamp for all sources in one refresh cycle.
+- Better source warning/error classification.
+- Metadata enrichment via DOI (Crossref + OpenAlex) to improve missing abstract/authors and clean malformed titles.
+- RSS parser now supports RSS 2.0, Atom, and RDF RSS 1.0 (`rdf:RDF`).
+  - This is important for Nature-family and IOP feeds.
+
+## Current Source Configuration Notes
+
+Configured in [`sources.json`](./sources.json):
+
+- `nature-physics` uses RSS + Crossref fallback:
+  - RSS: `https://www.nature.com/nphys.rss`
+  - fallback ISSN: `1745-2473`
+- `new-journal-of-physics` uses official IOP RSS + Crossref fallback:
+  - RSS: `https://iopscience.iop.org/journal/rss/1367-2630`
+  - fallback ISSN: `1367-2630`
+
+This avoids frequent zero-result fluctuation caused by using Crossref-only for NJP.
 
 ## Project Structure
 
 ```text
 .
-├─ app
-│  ├─ api
-│  │  ├─ papers/route.ts
-│  │  └─ refresh/route.ts
-│  ├─ globals.css
-│  ├─ layout.tsx
-│  └─ page.tsx
-├─ components
-│  └─ paper-dashboard.tsx
-├─ lib
-│  ├─ fetchers
-│  │  ├─ arxiv.ts
-│  │  ├─ crossref.ts
-│  │  ├─ index.ts
-│  │  └─ rss.ts
-│  ├─ cache.ts
-│  ├─ dedupe.ts
-│  ├─ http.ts
-│  ├─ paper-service.ts
-│  ├─ sources.ts
-│  ├─ types.ts
-│  └─ utils.ts
-├─ .env.example
-├─ package.json
-├─ sources.json
-├─ tsconfig.json
-├─ next.config.mjs
-└─ vercel.json
+|- app/
+|  |- api/
+|  |  |- papers/route.ts
+|  |  |- refresh/route.ts
+|  |- globals.css
+|  |- layout.tsx
+|  |- page.tsx
+|- components/
+|  |- paper-dashboard.tsx
+|- lib/
+|  |- fetchers/
+|  |  |- arxiv.ts
+|  |  |- crossref.ts
+|  |  |- doi-resolver.ts
+|  |  |- index.ts
+|  |  |- openalex.ts
+|  |  |- rss.ts
+|  |- cache.ts
+|  |- dedupe.ts
+|  |- errors.ts
+|  |- http.ts
+|  |- paper-service.ts
+|  |- sources.ts
+|  |- types.ts
+|  |- utils.ts
+|- sources.json
+|- .env.example
+|- package.json
+|- next.config.mjs
+|- vercel.json
 ```
 
-## Install
+## Install and Run
 
 ```bash
 npm install
-```
-
-## Run (Local)
-
-```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open [http://localhost:3000](http://localhost:3000).
 
-## Build and Production Run
+Production:
 
 ```bash
 npm run build
@@ -87,99 +111,89 @@ npm run start
 
 ## Environment Variables
 
-Copy `.env.example` to `.env.local`:
+Copy `.env.example` to `.env.local`.
 
 ```bash
-# macOS / Linux
+# macOS/Linux
 cp .env.example .env.local
 
-# Windows PowerShell
+# PowerShell
 Copy-Item .env.example .env.local
 ```
 
-Variables:
+Main vars:
 
-- `CROSSREF_MAILTO`: optional but recommended for polite Crossref usage.
-- `OPENALEX_MAILTO`: optional; used for OpenAlex DOI-based metadata enrichment.
-- `CACHE_TTL_MS`: server cache TTL in milliseconds.
-- `REQUEST_TIMEOUT_MS`: per-source request timeout.
-- `REQUEST_MAX_RETRIES`: retry count for retryable failures.
-- `REQUEST_BACKOFF_BASE_MS`: exponential backoff base milliseconds.
-- `REQUEST_USER_AGENT`: explicit User-Agent for external requests.
-- `SOURCE_REFRESH_CONCURRENCY`: source refresh concurrency.
-- `METADATA_ENRICH_CONCURRENCY`: DOI enrichment concurrency for Crossref/OpenAlex lookups.
-- `REFRESH_TOKEN`: optional bearer token for protecting `POST /api/refresh`.
+- `CROSSREF_MAILTO`
+- `OPENALEX_MAILTO`
+- `CACHE_TTL_MS`
+- `REQUEST_TIMEOUT_MS`
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_BASE_MS`
+- `REQUEST_USER_AGENT`
+- `SOURCE_REFRESH_CONCURRENCY`
+- `METADATA_ENRICH_CONCURRENCY`
+- `REFRESH_TOKEN` (optional)
 
-## Source Configuration (`sources.json`)
+## API
 
-Each source is defined as:
+### `GET /api/papers`
 
-```json
-{
-  "id": "prl",
-  "label": "PRL",
-  "type": "rss",
-  "url": "https://feeds.aps.org/rss/recent/prl.xml",
-  "rows": 100,
-  "enabled": true
-}
-```
+Query params:
 
-Supported source types:
+- `source=prl,pra`
+- `q=quantum`
+- `field=all|title|authors|abstract`
+- `sort=desc|asc`
 
-- `arxiv`: needs `category` (example: `quant-ph`)
-- `rss`: needs `url`
-- `crossref`: needs `issn`
+Response includes:
 
-Optional for RSS:
+- `papers`
+- `sourceViews`
+- `lastSuccessfulRefreshAt`
+- `currentRefreshAttemptAt`
+- `totalBeforeDedupe`
 
-- `fallbackCrossrefIssn`: use Crossref automatically when RSS fails or returns no results.
+### `POST /api/refresh`
 
-## API Endpoints
+- Soft refresh all sources.
+- Successful sources overwrite their own cache.
+- Failed sources keep stale cache if available.
+- If `REFRESH_TOKEN` is set, call with:
+  - `Authorization: Bearer <REFRESH_TOKEN>`
 
-- `GET /api/papers`
-  - Query params:
-    - `source=prl,pra`
-    - `q=quantum error correction`
-    - `field=all|title|authors|abstract`
-    - `sort=desc|asc`
-  - Response includes:
-    - `sourceViews` (each source status + cache freshness)
-    - `lastSuccessfulRefreshAt`
-    - `currentRefreshAttemptAt`
-- `POST /api/refresh`
-  - Soft refreshes each source independently and updates only successful sources.
-  - If `REFRESH_TOKEN` is set, include header:
-    - `Authorization: Bearer <REFRESH_TOKEN>`
+## Dedupe and Ordering
 
-## De-duplication Strategy
-
-Priority key:
+Dedupe priority:
 
 1. DOI
 2. arXiv ID
-3. Fallback key from normalized title + first author + publication day
+3. canonical URL
+4. normalized title fallback
 
-If duplicates are found, non-Crossref entries are preferred over Crossref entries, then richer metadata is preferred.
+Stable ordering:
+
+1. `publishedAt desc`
+2. `sourceLabel asc`
+3. `title asc`
+
+## Expected "0 articles" Cases
+
+If a source has no papers in the current UTC 7-day window, `articles: 0` can be valid.
+
+Check source status and warning text:
+
+- `source_returned_empty`: upstream returned no papers in that window (not a local crash).
+- `failed no cache`: source failed and has no prior cache.
+- `stale cache`: source failed now but prior cache is kept.
 
 ## Vercel Deployment
 
-1. Push this repository to GitHub.
-2. Import the repo in Vercel.
-3. Set environment variables in Vercel Project Settings:
-   - `CROSSREF_MAILTO`
-   - `CACHE_TTL_MS`
-   - `REQUEST_TIMEOUT_MS`
-   - `REFRESH_TOKEN` (optional)
-4. Deploy using defaults:
-   - Framework Preset: `Next.js`
-   - Build Command: `next build`
-   - Output: `.next`
-5. After deployment, your home page is publicly accessible.
+1. Push repo to GitHub.
+2. Import into Vercel.
+3. Configure env vars (at least `CROSSREF_MAILTO`; optional `REFRESH_TOKEN`).
+4. Deploy with default Next.js settings.
 
 ## Notes
 
-- Time filtering is unified to the latest 7 days.
-- Time filtering is based on a single UTC refresh timestamp for consistency across all sources.
-- The app intentionally avoids scraping HTML pages directly and prioritizes official APIs/RSS.
-- On serverless environments, memory cache is warm-instance scoped (restarts clear cache), and `POST /api/refresh` can repopulate it on demand.
+- This project avoids direct HTML scraping by design.
+- In-memory cache is per running instance. On serverless restarts, cache is rebuilt by next refresh.

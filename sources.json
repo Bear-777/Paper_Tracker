@@ -30,6 +30,7 @@
     "label": "Nature Physics",
     "type": "rss",
     "url": "https://www.nature.com/nphys.rss",
+    "fallbackCrossrefIssn": "1745-2473",
     "rows": 100,
     "enabled": true
   },
@@ -54,8 +55,9 @@
   {
     "id": "new-journal-of-physics",
     "label": "New Journal of Physics",
-    "type": "crossref",
-    "issn": "1367-2630",
+    "type": "rss",
+    "url": "https://iopscience.iop.org/journal/rss/1367-2630",
+    "fallbackCrossrefIssn": "1367-2630",
     "rows": 100,
     "enabled": true
   },

@@ -32,7 +32,7 @@ function parseAuthorList(raw: unknown): string[] {
   return values.filter((name) => !/^anonymous$/i.test(name));
 }
 
-function parseRssItem(item: Record<string, unknown>, source: SourceConfig): FetchedPaper | null {
+function parseRssItem(item: Record<string, unknown>, source: SourceConfig): FetchedPaper {
   const title = stripHtml(xmlValueToText(item.title));
   const abstract = stripHtml(
     xmlValueToText(item.description) || xmlValueToText(item["content:encoded"]) || xmlValueToText(item.summary)
@@ -60,7 +60,7 @@ function parseRssItem(item: Record<string, unknown>, source: SourceConfig): Fetc
   };
 }
 
-function parseAtomItem(entry: Record<string, unknown>, source: SourceConfig): FetchedPaper | null {
+function parseAtomItem(entry: Record<string, unknown>, source: SourceConfig): FetchedPaper {
   const title = stripHtml(xmlValueToText(entry.title));
   const abstract = stripHtml(
     xmlValueToText(entry.summary) || xmlValueToText(entry.content) || xmlValueToText(entry.description)
@@ -107,6 +107,25 @@ function parseAtomItem(entry: Record<string, unknown>, source: SourceConfig): Fe
   };
 }
 
+function extractRssItems(parsed: Record<string, unknown>): unknown[] {
+  const rssChannel = (parsed.rss as Record<string, unknown>)?.channel as Record<string, unknown> | undefined;
+  const rssItems = toArray(rssChannel?.item as unknown[]);
+
+  if (rssItems.length > 0) {
+    return rssItems;
+  }
+
+  // Nature family feeds may publish RSS 1.0 / RDF instead of RSS 2.0.
+  const rdfRoot = (parsed["rdf:RDF"] as Record<string, unknown>) ?? (parsed.RDF as Record<string, unknown>);
+  const rdfItems = toArray(rdfRoot?.item as unknown[]);
+
+  if (rdfItems.length > 0) {
+    return rdfItems;
+  }
+
+  return [];
+}
+
 export async function fetchRssPapers(source: SourceConfig): Promise<FetchedPaper[]> {
   if (!source.url) {
     return [];
@@ -126,9 +145,7 @@ export async function fetchRssPapers(source: SourceConfig): Promise<FetchedPaper
     });
   }
 
-  const rssItems = toArray(
-    ((parsed.rss as Record<string, unknown>)?.channel as Record<string, unknown>)?.item as unknown[]
-  )
+  const rssItems = extractRssItems(parsed)
     .map((item) => parseRssItem(item as Record<string, unknown>, source))
     .filter((paper): paper is FetchedPaper => paper !== null);
 
