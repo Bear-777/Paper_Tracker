@@ -4,6 +4,10 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
 
 ## Core Features
 
+- Fixed left sidebar navigation on desktop, with mobile hamburger navigation:
+  - Physics Papers Hub
+  - Weekly Source Trends
+  - Favorites
 - Home page shows papers from the latest 7-day UTC window.
 - Multi-source ingestion (official APIs/RSS first):
   - arXiv API (`export.arxiv.org/api/query`)
@@ -13,6 +17,8 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
   - arXiv quant-ph
   - PRL
   - PRA
+  - PRX
+  - PRX Quantum
   - Nature Physics
   - Physical Review Research
   - Communications Physics
@@ -23,6 +29,19 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
   - Title only
   - Authors only
   - Abstract only
+- Time window selector for displayed papers:
+  - Past 7 UTC days
+  - Past 3 UTC days
+  - Past 1 UTC day
+- Switchable quantum-themed background:
+  - Light Quantum Background for clean long-form reading
+  - Dark Quantum Background for low-light research sessions
+- Weekly Source Trends view:
+  - Counts each source's cached articles per UTC day across the current 7-day cache window.
+  - Uses the existing source cache only and does not issue extra external API requests.
+- Favorites view:
+  - Paper cards include a local Save/Saved button.
+  - Saved papers persist in browser `localStorage` under `physics-paper-hub-favorites`.
 - Sort by publication time (newest/oldest).
 - Each paper card shows title, authors, abstract, source, date, DOI/arXiv ID, and missing metadata hints.
 - `POST /api/refresh` soft refresh with source-level independent cache.
@@ -37,10 +56,17 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
 
 - Source-level independent cache (`articles`, `lastSuccessAt`, `lastAttemptAt`, `lastError`, `sourceStatus`).
 - Soft refresh: failed source keeps previous successful data.
+- Display-time filtering now supports 7-day, 3-day, and 1-day UTC windows while keeping the 7-day refresh/cache baseline unchanged.
+- Added a lightweight CSS-only Light/Dark Quantum Background theme toggle without changing data fetching or filtering behavior.
 - Request timeout/retry/backoff/concurrency/User-Agent.
 - Unified UTC refresh timestamp for all sources in one refresh cycle.
 - Better source warning/error classification.
 - Metadata enrichment via DOI (Crossref + OpenAlex) to improve missing abstract/authors and clean malformed titles.
+- More robust abstract extraction:
+  - source fields from arXiv/RSS/Crossref/OpenAlex first
+  - DOI metadata fallback via Crossref, OpenAlex, and Semantic Scholar
+  - publisher/DOI landing-page fallback via JSON-LD, abstract meta tags, Open Graph, Dublin Core, and common abstract containers
+  - development-only `[abstract-debug]` logs for strategy, URL, final URL, status code, and failure reason
 - RSS parser now supports RSS 2.0, Atom, and RDF RSS 1.0 (`rdf:RDF`).
   - This is important for Nature-family and IOP feeds.
 
@@ -48,6 +74,12 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
 
 Configured in [`sources.json`](./sources.json):
 
+- APS sources use official APS recent RSS feeds plus Crossref ISSN fallback:
+  - `prl`: RSS `http://feeds.aps.org/rss/recent/prl.xml`, fallback ISSN `0031-9007`
+  - `pra`: RSS `http://feeds.aps.org/rss/recent/pra.xml`, fallback ISSN `2469-9926`
+  - `prx`: RSS `http://feeds.aps.org/rss/recent/prx.xml`, fallback ISSN `2160-3308`
+  - `prx-quantum`: RSS `http://feeds.aps.org/rss/recent/prxquantum.xml`, fallback ISSN `2691-3399`
+  - `physical-review-research`: RSS `http://feeds.aps.org/rss/recent/prresearch.xml`, fallback ISSN `2643-1564`
 - `nature-physics` uses RSS + Crossref fallback:
   - RSS: `https://www.nature.com/nphys.rss`
   - fallback ISSN: `1745-2473`
@@ -78,6 +110,8 @@ This avoids frequent zero-result fluctuation caused by using Crossref-only for N
 |  |  |- index.ts
 |  |  |- openalex.ts
 |  |  |- rss.ts
+|  |  |- semantic-scholar.ts
+|  |- abstract.ts
 |  |- cache.ts
 |  |- dedupe.ts
 |  |- errors.ts
@@ -107,6 +141,16 @@ Production:
 ```bash
 npm run build
 npm run start
+```
+
+Abstract extraction checks:
+
+```bash
+npm run test:abstract
+
+# Optional live checks against real arXiv/APS/DOI/example.com pages:
+# PowerShell
+$env:ABSTRACT_LIVE_TEST='1'; npm run test:abstract; Remove-Item Env:ABSTRACT_LIVE_TEST
 ```
 
 ## Environment Variables
@@ -143,15 +187,18 @@ Query params:
 - `source=prl,pra`
 - `q=quantum`
 - `field=all|title|authors|abstract`
+- `days=7|3|1`
 - `sort=desc|asc`
 
 Response includes:
 
 - `papers`
 - `sourceViews`
+- `sourceDailyCounts`
 - `lastSuccessfulRefreshAt`
 - `currentRefreshAttemptAt`
 - `totalBeforeDedupe`
+- `timeWindowDays`
 
 ### `POST /api/refresh`
 

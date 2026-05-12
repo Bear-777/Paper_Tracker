@@ -32,6 +32,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     total: aggregated.papers.length,
     papers: aggregated.papers,
     sourceViews: aggregated.sourceViews,
+    sourceDailyCounts: aggregated.sourceDailyCounts,
     sources: SOURCE_OPTIONS
   });
 }

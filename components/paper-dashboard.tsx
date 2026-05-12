@@ -1,11 +1,45 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { Paper, SourceView } from "@/lib/types";
+import type { Paper, SourceDailyCount, SourceView } from "@/lib/types";
+import { isWithinUtcDayWindow } from "@/lib/utils";
 
 type SortOrder = "desc" | "asc";
 type SearchScope = "all" | "title" | "authors" | "abstract";
+type TimeWindowDays = 1 | 3 | 7;
+type BackgroundTheme = "light" | "dark";
+type ActiveView = "home" | "trends" | "favorites";
+
+const BACKGROUND_THEME_STORAGE_KEY = "physics-paper-hub-background-theme";
+const FAVORITES_STORAGE_KEY = "physics-paper-hub-favorites";
+
+const TIME_WINDOW_OPTIONS: { days: TimeWindowDays; label: string }[] = [
+  { days: 7, label: "Past 7 UTC days" },
+  { days: 3, label: "Past 3 UTC days" },
+  { days: 1, label: "Past 1 UTC day" }
+];
+
+const NAV_ITEMS: { id: ActiveView; label: string }[] = [
+  { id: "home", label: "Physics Papers Hub" },
+  { id: "trends", label: "Weekly Source Trends" },
+  { id: "favorites", label: "Favorites" }
+];
+
+const TREND_COLORS = [
+  "#2f6f8f",
+  "#7b61a8",
+  "#317a5e",
+  "#b06c3d",
+  "#516fbc",
+  "#9a5e7b",
+  "#598f9f",
+  "#8b7a3d",
+  "#5e7190",
+  "#9b6f54",
+  "#4f8a83",
+  "#8067b2"
+];
 
 interface SourceOption {
   id: string;
@@ -17,6 +51,7 @@ interface PaperDashboardProps {
   initialUpdatedAt: string;
   initialCurrentRefreshAttemptAt: string;
   initialSourceViews: SourceView[];
+  initialSourceDailyCounts: SourceDailyCount[];
   initialTotalBeforeDedupe: number;
   sources: SourceOption[];
 }
@@ -32,6 +67,13 @@ function formatDate(isoDate: string): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(date);
+}
+
+function getRefreshAnchorMs(currentRefreshAttemptAt: string, lastSuccessfulRefreshAt: string): number {
+  const anchor = currentRefreshAttemptAt || lastSuccessfulRefreshAt;
+  const parsed = anchor ? new Date(anchor).getTime() : Number.NaN;
+
+  return Number.isNaN(parsed) ? Date.now() : parsed;
 }
 
 function pickIdentifier(paper: Paper): { label: string; value: string; href: string } | null {
@@ -120,12 +162,75 @@ function dataModeLabel(source: SourceView): string {
   return "fresh data";
 }
 
+function parseStoredFavorites(raw: string | null): Record<string, Paper> {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return {};
+    }
+
+    return parsed.reduce<Record<string, Paper>>((accumulator, item) => {
+      if (item && typeof item === "object" && "id" in item) {
+        const paper = item as Paper;
+
+        if (typeof paper.id === "string") {
+          accumulator[paper.id] = paper;
+        }
+      }
+
+      return accumulator;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function sortPapersByDateDesc(left: Paper, right: Paper): number {
+  const publishedDiff = new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime();
+
+  if (publishedDiff !== 0) {
+    return publishedDiff;
+  }
+
+  const sourceDiff = left.sourceLabel.localeCompare(right.sourceLabel);
+
+  if (sourceDiff !== 0) {
+    return sourceDiff;
+  }
+
+  return left.title.localeCompare(right.title);
+}
+
+function getTrendDates(sourceDailyCounts: SourceDailyCount[]): string[] {
+  return sourceDailyCounts[0]?.counts.map((entry) => entry.date) ?? [];
+}
+
+function formatTrendDate(date: string): string {
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC"
+  }).format(parsed);
+}
+
 export default function PaperDashboard(props: PaperDashboardProps): JSX.Element {
   const {
     initialPapers,
     initialUpdatedAt,
     initialCurrentRefreshAttemptAt,
     initialSourceViews,
+    initialSourceDailyCounts,
     initialTotalBeforeDedupe,
     sources
   } = props;
@@ -133,19 +238,53 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   const [lastSuccessfulRefreshAt, setLastSuccessfulRefreshAt] = useState(initialUpdatedAt);
   const [currentRefreshAttemptAt, setCurrentRefreshAttemptAt] = useState(initialCurrentRefreshAttemptAt);
   const [sourceViews, setSourceViews] = useState<SourceView[]>(initialSourceViews);
+  const [sourceDailyCounts, setSourceDailyCounts] = useState<SourceDailyCount[]>(initialSourceDailyCounts);
   const [totalBeforeDedupe, setTotalBeforeDedupe] = useState(initialTotalBeforeDedupe);
   const [query, setQuery] = useState("");
   const [searchScope, setSearchScope] = useState<SearchScope>("all");
+  const [timeWindowDays, setTimeWindowDays] = useState<TimeWindowDays>(7);
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(sources.map((source) => source.id));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [statusText, setStatusText] = useState("");
+  const [backgroundTheme, setBackgroundTheme] = useState<BackgroundTheme>("light");
+  const [activeView, setActiveView] = useState<ActiveView>("home");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [favoritePapers, setFavoritePapers] = useState<Record<string, Paper>>({});
+  const [favoritesHydrated, setFavoritesHydrated] = useState(false);
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem(BACKGROUND_THEME_STORAGE_KEY);
+
+    if (storedTheme === "dark" || storedTheme === "light") {
+      setBackgroundTheme(storedTheme);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(BACKGROUND_THEME_STORAGE_KEY, backgroundTheme);
+  }, [backgroundTheme]);
+
+  useEffect(() => {
+    setFavoritePapers(parseStoredFavorites(window.localStorage.getItem(FAVORITES_STORAGE_KEY)));
+    setFavoritesHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!favoritesHydrated) {
+      return;
+    }
+
+    window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Object.values(favoritePapers)));
+  }, [favoritePapers, favoritesHydrated]);
 
   const filteredPapers = useMemo(() => {
     const sourceSet = new Set(selectedSourceIds);
     const normalizedQuery = query.trim().toLowerCase();
+    const refreshAnchorMs = getRefreshAnchorMs(currentRefreshAttemptAt, lastSuccessfulRefreshAt);
 
     return papers
+      .filter((paper) => isWithinUtcDayWindow(paper.publishedAt, refreshAnchorMs, timeWindowDays))
       .filter((paper) => sourceSet.has(paper.sourceId))
       .filter((paper) => {
         if (!normalizedQuery) {
@@ -178,7 +317,32 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
 
         return left.title.localeCompare(right.title);
       });
-  }, [papers, query, searchScope, selectedSourceIds, sortOrder]);
+  }, [
+    currentRefreshAttemptAt,
+    lastSuccessfulRefreshAt,
+    papers,
+    query,
+    searchScope,
+    selectedSourceIds,
+    sortOrder,
+    timeWindowDays
+  ]);
+
+  const favoriteList = useMemo(
+    () => Object.values(favoritePapers).sort(sortPapersByDateDesc),
+    [favoritePapers]
+  );
+
+  const trendDates = useMemo(() => getTrendDates(sourceDailyCounts), [sourceDailyCounts]);
+  const maxTrendCount = useMemo(
+    () =>
+      Math.max(
+        0,
+        ...sourceDailyCounts.flatMap((source) => source.counts.map((entry) => entry.count))
+      ),
+    [sourceDailyCounts]
+  );
+  const hasTrendData = maxTrendCount > 0;
 
   function toggleSource(id: string): void {
     setSelectedSourceIds((current) =>
@@ -188,6 +352,27 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
 
   function setAllSources(selected: boolean): void {
     setSelectedSourceIds(selected ? sources.map((source) => source.id) : []);
+  }
+
+  function selectView(view: ActiveView): void {
+    setActiveView(view);
+    setIsSidebarOpen(false);
+  }
+
+  function toggleFavorite(paper: Paper): void {
+    setFavoritePapers((current) => {
+      const next = { ...current };
+
+      if (next[paper.id]) {
+        delete next[paper.id];
+
+        return next;
+      }
+
+      next[paper.id] = paper;
+
+      return next;
+    });
   }
 
   async function onRefresh(): Promise<void> {
@@ -208,6 +393,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
         currentRefreshAttemptAt?: string;
         lastSuccessfulRefreshAt?: string;
         sourceViews?: SourceView[];
+        sourceDailyCounts?: SourceDailyCount[];
         totalBeforeDedupe?: number;
         error?: string;
       };
@@ -221,6 +407,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       setLastSuccessfulRefreshAt(payload.lastSuccessfulRefreshAt ?? payload.updatedAt ?? new Date().toISOString());
       setCurrentRefreshAttemptAt(payload.currentRefreshAttemptAt ?? new Date().toISOString());
       setSourceViews(payload.sourceViews ?? []);
+      setSourceDailyCounts(payload.sourceDailyCounts ?? []);
       setTotalBeforeDedupe(payload.totalBeforeDedupe ?? payload.papers?.length ?? 0);
       setStatusText("Data refreshed.");
     } catch (error) {
@@ -242,163 +429,389 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     [sourceViews]
   );
 
-  return (
-    <main className="page-shell">
-      <section className="hero">
-        <h1>Physics Papers Hub</h1>
-        <p>
-          Aggregated papers from the last 7 days across arXiv and selected journals, with source filtering, keyword
-          search, and refreshable server-side cache.
-        </p>
-      </section>
+  function renderPaperCard(paper: Paper): JSX.Element {
+    const identifier = pickIdentifier(paper);
+    const missingFields = getMissingFields(paper);
+    const isFavorite = Boolean(favoritePapers[paper.id]);
 
-      <section className="controls card">
-        <div className="controls-row">
-          <label className="field">
-            <span>Keyword</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search title, abstract, authors"
-            />
-          </label>
-
-          <label className="field">
-            <span>Search in</span>
-            <select value={searchScope} onChange={(event) => setSearchScope(event.target.value as SearchScope)}>
-              <option value="all">Title + authors + abstract</option>
-              <option value="title">Title only</option>
-              <option value="authors">Authors only</option>
-              <option value="abstract">Abstract only</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Sort</span>
-            <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as SortOrder)}>
-              <option value="desc">Newest first</option>
-              <option value="asc">Oldest first</option>
-            </select>
-          </label>
-
-          <button type="button" className="refresh-button" onClick={onRefresh} disabled={isRefreshing}>
-            {isRefreshing ? "Refreshing..." : "Refresh data"}
+    return (
+      <article key={paper.id} className="paper-card card">
+        <header className="paper-header">
+          <div>
+            <h2>
+              <a href={paper.url} target="_blank" rel="noreferrer">
+                {paper.title}
+              </a>
+            </h2>
+            <p className="meta-line">
+              <span>{paper.sourceLabel}</span>
+              <span>{formatDate(paper.publishedAt)}</span>
+            </p>
+          </div>
+          <button
+            type="button"
+            className={`favorite-button ${isFavorite ? "is-active" : ""}`}
+            aria-pressed={isFavorite}
+            onClick={() => toggleFavorite(paper)}
+          >
+            {isFavorite ? "Saved" : "Save"}
           </button>
-        </div>
+        </header>
 
-        <div className="controls-row info-row">
-          <p>Last successful refresh: {lastSuccessfulRefreshAt ? formatDate(lastSuccessfulRefreshAt) : "N/A"}</p>
-          <p>Current refresh attempt: {currentRefreshAttemptAt ? formatDate(currentRefreshAttemptAt) : "N/A"}</p>
-          <p>
-            Showing {filteredPapers.length} / {papers.length} papers (raw: {totalBeforeDedupe})
+        <p className="authors">
+          {paper.authors.length > 0
+            ? paper.authors.join(", ")
+            : "Authors unavailable (upstream source metadata did not provide authors)."}
+        </p>
+        <p className="abstract">
+          {paper.abstract || "Abstract unavailable (upstream source metadata did not provide abstract)."}
+        </p>
+
+        {identifier ? (
+          <p className="identifier">
+            {identifier.label}:{" "}
+            <a href={identifier.href} target="_blank" rel="noreferrer">
+              {identifier.value}
+            </a>
           </p>
-          {statusText ? <p>{statusText}</p> : null}
+        ) : (
+          <p className="identifier">Identifier unavailable (upstream source metadata missing DOI/arXiv ID).</p>
+        )}
+
+        {missingFields.length > 0 ? (
+          <p className="missing-hint">
+            Missing metadata: {missingFields.join(", ")} (from source feeds/APIs, not local filtering error).
+          </p>
+        ) : null}
+      </article>
+    );
+  }
+
+  function renderTrendChart(): JSX.Element {
+    const chartWidth = 840;
+    const chartHeight = 320;
+    const padding = { top: 24, right: 28, bottom: 52, left: 42 };
+    const plotWidth = chartWidth - padding.left - padding.right;
+    const plotHeight = chartHeight - padding.top - padding.bottom;
+    const safeMax = Math.max(1, maxTrendCount);
+    const xForIndex = (index: number) =>
+      padding.left + (trendDates.length <= 1 ? plotWidth / 2 : (plotWidth / (trendDates.length - 1)) * index);
+    const yForCount = (count: number) => padding.top + plotHeight - (count / safeMax) * plotHeight;
+    const yTicks = Array.from(new Set([0, Math.ceil(safeMax / 2), safeMax])).sort((left, right) => left - right);
+
+    return (
+      <section className="card trends-card">
+        <div className="section-heading">
+          <div>
+            <h2>Weekly Source Trends</h2>
+            <p>Daily article counts by source from the current 7-day UTC cache window.</p>
+          </div>
         </div>
 
-        <fieldset className="source-grid">
-          <legend>Sources</legend>
-          <div className="source-actions">
-            <button type="button" onClick={() => setAllSources(true)}>
-              Select all
+        {sourceDailyCounts.length === 0 ? (
+          <p className="empty-state">No cached source trend data is available yet. Refresh data to populate trends.</p>
+        ) : (
+          <>
+            <div className="trend-chart-wrap" aria-label="Weekly source trends chart">
+              <svg className="trend-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img">
+                <title>Weekly source trends</title>
+                {yTicks.map((tick) => {
+                  const y = yForCount(tick);
+
+                  return (
+                    <g key={tick}>
+                      <line className="trend-grid-line" x1={padding.left} x2={chartWidth - padding.right} y1={y} y2={y} />
+                      <text className="trend-axis-label" x={padding.left - 10} y={y + 4} textAnchor="end">
+                        {tick}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {trendDates.map((date, index) => (
+                  <text
+                    key={date}
+                    className="trend-axis-label"
+                    x={xForIndex(index)}
+                    y={chartHeight - 18}
+                    textAnchor="middle"
+                  >
+                    {formatTrendDate(date)}
+                  </text>
+                ))}
+
+                {sourceDailyCounts.map((source, sourceIndex) => {
+                  const color = TREND_COLORS[sourceIndex % TREND_COLORS.length];
+                  const points = source.counts
+                    .map((entry, index) => `${xForIndex(index)},${yForCount(entry.count)}`)
+                    .join(" ");
+
+                  return (
+                    <g key={source.sourceId}>
+                      <polyline className="trend-line" points={points} stroke={color} />
+                      {source.counts.map((entry, index) => (
+                        <circle
+                          key={`${source.sourceId}-${entry.date}`}
+                          className="trend-point"
+                          cx={xForIndex(index)}
+                          cy={yForCount(entry.count)}
+                          r={entry.count > 0 ? 3.6 : 2.4}
+                          fill={color}
+                        />
+                      ))}
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+
+            {!hasTrendData ? <p className="empty-state">No articles were found in the current 7-day UTC window.</p> : null}
+
+            <div className="trend-legend">
+              {sourceDailyCounts.map((source, index) => (
+                <span key={source.sourceId} className="trend-legend-item">
+                  <span className="trend-swatch" style={{ backgroundColor: TREND_COLORS[index % TREND_COLORS.length] }} />
+                  {source.sourceLabel}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <div className={`quantum-app quantum-theme-${backgroundTheme}`}>
+      <div className="quantum-backdrop" aria-hidden="true">
+        <span className="quantum-wave quantum-wave-one" />
+        <span className="quantum-wave quantum-wave-two" />
+        <span className="quantum-node-field" />
+      </div>
+
+      <button
+        type="button"
+        className={`sidebar-scrim ${isSidebarOpen ? "is-open" : ""}`}
+        aria-label="Close navigation"
+        onClick={() => setIsSidebarOpen(false)}
+      />
+
+      <header className="mobile-topbar">
+        <button
+          type="button"
+          className="menu-button"
+          aria-label="Open navigation"
+          aria-expanded={isSidebarOpen}
+          onClick={() => setIsSidebarOpen(true)}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <span>Physics Papers Hub</span>
+      </header>
+
+      <aside className={`app-sidebar ${isSidebarOpen ? "is-open" : ""}`} aria-label="Primary navigation">
+        <div className="sidebar-brand">
+          <p>Physics Papers Hub</p>
+          <span>Quantum paper tracker</span>
+        </div>
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`sidebar-nav-item ${activeView === item.id ? "is-active" : ""}`}
+              aria-current={activeView === item.id ? "page" : undefined}
+              onClick={() => selectView(item.id)}
+            >
+              {item.label}
+              {item.id === "favorites" ? <span className="nav-count">{favoriteList.length}</span> : null}
             </button>
-            <button type="button" onClick={() => setAllSources(false)}>
-              Clear
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <span>Cache window</span>
+          <strong>7 UTC days</strong>
+        </div>
+      </aside>
+
+      <main className="page-shell">
+        <section className="hero">
+          <div className="hero-copy">
+            <h1>Physics Papers Hub</h1>
+            <p>
+              Aggregated papers from the last 7 days across arXiv and selected journals, with source filtering, keyword
+              search, and refreshable server-side cache.
+            </p>
+          </div>
+          <div className="theme-toggle" aria-label="Background theme">
+            <button
+              type="button"
+              className={`theme-option ${backgroundTheme === "light" ? "is-active" : ""}`}
+              aria-pressed={backgroundTheme === "light"}
+              onClick={() => setBackgroundTheme("light")}
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              className={`theme-option ${backgroundTheme === "dark" ? "is-active" : ""}`}
+              aria-pressed={backgroundTheme === "dark"}
+              onClick={() => setBackgroundTheme("dark")}
+            >
+              Dark
             </button>
           </div>
-          {sources.map((source) => (
-            <label key={source.id} className="source-option">
-              <input
-                type="checkbox"
-                checked={selectedSourceIds.includes(source.id)}
-                onChange={() => toggleSource(source.id)}
-              />
-              <span>{source.label}</span>
-            </label>
-          ))}
-        </fieldset>
-      </section>
-
-      <section className="card status-card">
-        <h2>Source status</h2>
-        <div className="status-grid">
-          {sourceViews.map((source) => (
-            <article key={source.sourceId} className="status-item">
-              <p>
-                <strong>{source.sourceLabel}</strong>
-              </p>
-              <p>Status: {sourceStatusLabel(source)}</p>
-              <p>Data mode: {dataModeLabel(source)}</p>
-              <p>Articles: {source.articleCount}</p>
-              <p>Last success: {source.lastSuccessAt ? formatDate(source.lastSuccessAt) : "N/A"}</p>
-              <p>Last attempt: {source.lastAttemptAt ? formatDate(source.lastAttemptAt) : "N/A"}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      {warningSources.length > 0 ? (
-        <section className="card warning-card">
-          <h2>Source warnings</h2>
-          <ul>
-            {warningSources.map((source) => (
-              <li key={`${source.sourceId}-${source.lastError?.message ?? "no-error-message"}`}>
-                <strong>{source.sourceLabel}</strong>: {errorKindLabel(source.lastError?.kind)} -{" "}
-                {source.lastError?.message ?? "No additional detail"}
-              </li>
-            ))}
-          </ul>
         </section>
-      ) : null}
 
-      <section className="paper-list">
-        {filteredPapers.map((paper) => {
-          const identifier = pickIdentifier(paper);
-          const missingFields = getMissingFields(paper);
+        {activeView === "home" ? (
+          <>
+        <section className="controls card">
+          <div className="controls-row">
+            <label className="field">
+              <span>Keyword</span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search title, abstract, authors"
+              />
+            </label>
 
-          return (
-            <article key={paper.id} className="paper-card card">
-              <header className="paper-header">
-                <h2>
-                  <a href={paper.url} target="_blank" rel="noreferrer">
-                    {paper.title}
-                  </a>
-                </h2>
-                <p className="meta-line">
-                  <span>{paper.sourceLabel}</span>
-                  <span>{formatDate(paper.publishedAt)}</span>
+            <label className="field">
+              <span>Search in</span>
+              <select value={searchScope} onChange={(event) => setSearchScope(event.target.value as SearchScope)}>
+                <option value="all">Title + authors + abstract</option>
+                <option value="title">Title only</option>
+                <option value="authors">Authors only</option>
+                <option value="abstract">Abstract only</option>
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Time window</span>
+              <select
+                value={timeWindowDays}
+                onChange={(event) => setTimeWindowDays(Number(event.target.value) as TimeWindowDays)}
+              >
+                {TIME_WINDOW_OPTIONS.map((option) => (
+                  <option key={option.days} value={option.days}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Sort</span>
+              <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as SortOrder)}>
+                <option value="desc">Newest first</option>
+                <option value="asc">Oldest first</option>
+              </select>
+            </label>
+
+            <button type="button" className="refresh-button" onClick={onRefresh} disabled={isRefreshing}>
+              {isRefreshing ? "Refreshing..." : "Refresh data"}
+            </button>
+          </div>
+
+          <div className="controls-row info-row">
+            <p>Last successful refresh: {lastSuccessfulRefreshAt ? formatDate(lastSuccessfulRefreshAt) : "N/A"}</p>
+            <p>Current refresh attempt: {currentRefreshAttemptAt ? formatDate(currentRefreshAttemptAt) : "N/A"}</p>
+            <p>
+              Showing {filteredPapers.length} / {papers.length} papers in selected window (raw: {totalBeforeDedupe})
+            </p>
+            {statusText ? <p>{statusText}</p> : null}
+          </div>
+
+          <fieldset className="source-grid">
+            <legend>Sources</legend>
+            <div className="source-actions">
+              <button type="button" onClick={() => setAllSources(true)}>
+                Select all
+              </button>
+              <button type="button" onClick={() => setAllSources(false)}>
+                Clear
+              </button>
+            </div>
+            {sources.map((source) => (
+              <label key={source.id} className="source-option">
+                <input
+                  type="checkbox"
+                  checked={selectedSourceIds.includes(source.id)}
+                  onChange={() => toggleSource(source.id)}
+                />
+                <span>{source.label}</span>
+              </label>
+            ))}
+          </fieldset>
+        </section>
+
+        <section className="card status-card">
+          <h2>Source status</h2>
+          <div className="status-grid">
+            {sourceViews.map((source) => (
+              <article key={source.sourceId} className="status-item">
+                <p>
+                  <strong>{source.sourceLabel}</strong>
                 </p>
-              </header>
+                <p>Status: {sourceStatusLabel(source)}</p>
+                <p>Data mode: {dataModeLabel(source)}</p>
+                <p>Articles: {source.articleCount}</p>
+                <p>Last success: {source.lastSuccessAt ? formatDate(source.lastSuccessAt) : "N/A"}</p>
+                <p>Last attempt: {source.lastAttemptAt ? formatDate(source.lastAttemptAt) : "N/A"}</p>
+              </article>
+            ))}
+          </div>
+        </section>
 
-              <p className="authors">
-                {paper.authors.length > 0
-                  ? paper.authors.join(", ")
-                  : "Authors unavailable (upstream source metadata did not provide authors)."}
-              </p>
-              <p className="abstract">
-                {paper.abstract || "Abstract unavailable (upstream source metadata did not provide abstract)."}
-              </p>
+        {warningSources.length > 0 ? (
+          <section className="card warning-card">
+            <h2>Source warnings</h2>
+            <ul>
+              {warningSources.map((source) => (
+                <li key={`${source.sourceId}-${source.lastError?.message ?? "no-error-message"}`}>
+                  <strong>{source.sourceLabel}</strong>: {errorKindLabel(source.lastError?.kind)} -{" "}
+                  {source.lastError?.message ?? "No additional detail"}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
-              {identifier ? (
-                <p className="identifier">
-                  {identifier.label}:{" "}
-                  <a href={identifier.href} target="_blank" rel="noreferrer">
-                    {identifier.value}
-                  </a>
-                </p>
-              ) : (
-                <p className="identifier">Identifier unavailable (upstream source metadata missing DOI/arXiv ID).</p>
-              )}
+        {filteredPapers.length > 0 ? (
+          <section className="paper-list">{filteredPapers.map((paper) => renderPaperCard(paper))}</section>
+        ) : (
+          <section className="card empty-card">
+            <h2>No papers match the current filters</h2>
+            <p>Try clearing the source filter, broadening the time window, or refreshing the source cache.</p>
+          </section>
+        )}
+          </>
+        ) : null}
 
-              {missingFields.length > 0 ? (
-                <p className="missing-hint">
-                  Missing metadata: {missingFields.join(", ")} (from source feeds/APIs, not local filtering error).
-                </p>
-              ) : null}
-            </article>
-          );
-        })}
-      </section>
-    </main>
+        {activeView === "trends" ? renderTrendChart() : null}
+
+        {activeView === "favorites" ? (
+          <section className="favorites-view">
+            <div className="card section-heading">
+              <div>
+                <h2>Favorites</h2>
+                <p>Saved papers are stored locally in this browser for later reading.</p>
+              </div>
+            </div>
+            {favoriteList.length > 0 ? (
+              <section className="paper-list">{favoriteList.map((paper) => renderPaperCard(paper))}</section>
+            ) : (
+              <section className="card empty-card">
+                <h2>No favorites yet</h2>
+                <p>Use the Save button on any paper card to keep it here after refreshes.</p>
+              </section>
+            )}
+          </section>
+        ) : null}
+      </main>
+    </div>
   );
 }

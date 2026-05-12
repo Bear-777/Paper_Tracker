@@ -52,31 +52,43 @@ export function decodeHtmlEntities(text: string): string {
     .replace(/&ndash;/gi, "-")
     .replace(/&mdash;/gi, "-");
   const namedEntities: Record<string, string> = {
-    "&alpha;": "α",
-    "&beta;": "β",
-    "&gamma;": "γ",
-    "&delta;": "δ",
-    "&Delta;": "Δ",
-    "&epsilon;": "ε",
-    "&theta;": "θ",
-    "&lambda;": "λ",
-    "&mu;": "μ",
-    "&nu;": "ν",
-    "&pi;": "π",
-    "&rho;": "ρ",
-    "&sigma;": "σ",
-    "&tau;": "τ",
-    "&phi;": "φ",
-    "&chi;": "χ",
-    "&psi;": "ψ",
-    "&omega;": "ω",
-    "&Omega;": "Ω",
-    "&times;": "×",
-    "&minus;": "−"
+    "&alpha;": "\u03b1",
+    "&beta;": "\u03b2",
+    "&gamma;": "\u03b3",
+    "&delta;": "\u03b4",
+    "&Delta;": "\u0394",
+    "&epsilon;": "\u03b5",
+    "&theta;": "\u03b8",
+    "&lambda;": "\u03bb",
+    "&mu;": "\u03bc",
+    "&nu;": "\u03bd",
+    "&pi;": "\u03c0",
+    "&rho;": "\u03c1",
+    "&sigma;": "\u03c3",
+    "&tau;": "\u03c4",
+    "&phi;": "\u03c6",
+    "&chi;": "\u03c7",
+    "&psi;": "\u03c8",
+    "&omega;": "\u03c9",
+    "&Omega;": "\u03a9",
+    "&times;": "\u00d7",
+    "&minus;": "\u2212",
+    "&le;": "\u2264",
+    "&ge;": "\u2265",
+    "&plusmn;": "\u00b1",
+    "&middot;": "\u00b7",
+    "&thinsp;": " ",
+    "&ensp;": " ",
+    "&emsp;": " ",
+    "&hellip;": "...",
+    "&lsquo;": "'",
+    "&rsquo;": "'",
+    "&ldquo;": "\"",
+    "&rdquo;": "\""
   };
 
   for (const [entity, value] of Object.entries(namedEntities)) {
-    decoded = decoded.replace(new RegExp(entity, "g"), value);
+    decoded = decoded.replace(new RegExp(entity, "gi"), value);
   }
 
   return decodeNumericHtmlEntities(decoded);
@@ -206,7 +218,9 @@ export function toIsoDate(value: string | number | Date | undefined): string | u
   return date.toISOString();
 }
 
-export function getUtcWindowStartMs(refreshTimestampMs: number): number {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function getUtcWindowStartMs(refreshTimestampMs: number, windowDays = 7): number {
   const refreshDate = new Date(refreshTimestampMs);
   const utcStart = Date.UTC(
     refreshDate.getUTCFullYear(),
@@ -218,17 +232,21 @@ export function getUtcWindowStartMs(refreshTimestampMs: number): number {
     0
   );
 
-  return utcStart - 6 * 24 * 60 * 60 * 1000;
+  return utcStart - (Math.max(1, windowDays) - 1) * DAY_MS;
 }
 
 export function isWithinLast7Days(isoDate: string, refreshTimestampMs: number): boolean {
+  return isWithinUtcDayWindow(isoDate, refreshTimestampMs, 7);
+}
+
+export function isWithinUtcDayWindow(isoDate: string, refreshTimestampMs: number, windowDays: number): boolean {
   const targetDate = new Date(isoDate);
 
   if (Number.isNaN(targetDate.getTime())) {
     return false;
   }
 
-  const startMs = getUtcWindowStartMs(refreshTimestampMs);
+  const startMs = getUtcWindowStartMs(refreshTimestampMs, windowDays);
 
   return targetDate.getTime() >= startMs && targetDate.getTime() <= refreshTimestampMs;
 }

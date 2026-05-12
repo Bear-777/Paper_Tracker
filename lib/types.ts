@@ -78,10 +78,20 @@ export interface SourceView {
   lastError?: SourceErrorInfo;
 }
 
+export interface SourceDailyCount {
+  sourceId: string;
+  sourceLabel: string;
+  counts: {
+    date: string;
+    count: number;
+  }[];
+}
+
 export interface AggregatedResult {
   papers: Paper[];
   totalBeforeDedupe: number;
   sourceViews: SourceView[];
+  sourceDailyCounts: SourceDailyCount[];
   currentRefreshAttemptAt?: string;
   lastSuccessfulRefreshAt?: string;
 }

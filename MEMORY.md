@@ -1,6 +1,6 @@
 ﻿# Project Memory: Physics Papers Hub
 
-Last updated: 2026-05-09
+Last updated: 2026-05-11
 Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
 
 ## Conversation Memory (Latest)
@@ -11,6 +11,11 @@ Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
 - You repeatedly reported two practical issues:
   - Nature Physics often showed 0 articles.
   - New Journal of Physics often showed 0 articles.
+- Latest source expansion added PRX and PRX Quantum using APS RSS plus Crossref fallback ISSNs.
+- Latest UI expansion added a left sidebar with three views:
+  - Physics Papers Hub
+  - Weekly Source Trends
+  - Favorites
 
 ## Root Causes and Fixes Applied
 
@@ -44,10 +49,37 @@ Fix:
 ## Current Functional Baseline
 
 - UTC-consistent 7-day window per refresh attempt.
+- User-selectable display window over the cached 7-day baseline:
+  - past 7 UTC days
+  - past 3 UTC days
+  - past 1 UTC day
+- Switchable Light/Dark Quantum Background:
+  - CSS gradients, subtle wave/circuit/node decorations, and theme variables
+  - No change to crawler/API/search/filtering logic
+- Sidebar navigation:
+  - fixed left sidebar on desktop
+  - mobile hamburger menu with overlay
+  - all views keep the existing light/dark quantum background
+- Weekly Source Trends:
+  - data comes from `sourceDailyCounts` in the existing aggregate/cache response
+  - counts cached source articles per UTC day for the current 7-day window
+  - does not trigger new external API requests
+- Favorites:
+  - local-only minimal implementation using browser `localStorage`
+  - storage key: `physics-paper-hub-favorites`
+  - paper cards show Save/Saved, and Favorites displays only saved papers
 - Stable dedupe and deterministic sorting.
 - Source-level soft refresh with stale cache retention on failure.
+- PRX and PRX Quantum are configured like the other APS journals:
+  - PRX: APS RSS + Crossref fallback ISSN `2160-3308`
+  - PRX Quantum: APS RSS + Crossref fallback ISSN `2691-3399`
 - Search scope filter by field (all/title/authors/abstract).
 - Missing metadata is explicitly labeled in UI instead of silently dropping records.
+- Abstract extraction is now centralized in `lib/abstract.ts`:
+  - cleans "Abstract/Summary/Background" prefixes and common HTML/entity noise
+  - reads JSON-LD description/abstract, `citation_abstract`, `description`, `og:description`, `dc.description`, and abstract-like containers
+  - enriches DOI records through Crossref, OpenAlex, Semantic Scholar, then publisher/DOI landing pages
+  - logs `[abstract-debug]` in development with matched strategy and failure reason
 
 ## Interpretation Guide
 
@@ -56,15 +88,19 @@ Fix:
   - Not necessarily a local parsing/fetch failure.
 - `partial_data`:
   - Papers exist but a share of records lacks abstract/authors from upstream metadata.
+- `GET /api/papers?days=7|3|1`:
+  - Narrows displayed/API-returned papers by UTC day window.
+  - Does not change the 7-day refresh/cache baseline.
 
 ## Open Risk Notes
 
 - Upstream metadata quality is uneven.
 - Even after enrichment, some papers may still have no abstract.
 - In-memory cache is instance-local; serverless cold starts lose cache.
+- Direct publisher pages can still return 403/429 or JavaScript-only content, but those failures are isolated and should fall back to metadata APIs when possible.
 
 ## Suggested Next Actions
 
 1. Optional "7-day empty -> auto-check 14-day" mode with clear badge.
 2. Persistent distributed cache for deployment stability.
-3. Add small e2e regression tests for RDF feeds and source window edge cases.
+3. Add small e2e regression tests for RDF feeds, sidebar navigation, favorites persistence, and source window edge cases.

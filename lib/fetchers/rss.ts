@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 
+import { pickBestAbstract } from "@/lib/abstract";
 import { SourceRequestError } from "@/lib/errors";
 import { fetchText } from "@/lib/http";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
@@ -34,9 +35,17 @@ function parseAuthorList(raw: unknown): string[] {
 
 function parseRssItem(item: Record<string, unknown>, source: SourceConfig): FetchedPaper {
   const title = stripHtml(xmlValueToText(item.title));
-  const abstract = stripHtml(
-    xmlValueToText(item.description) || xmlValueToText(item["content:encoded"]) || xmlValueToText(item.summary)
-  );
+  const abstract = pickBestAbstract(
+    [
+      { strategy: "rss:description", value: item.description },
+      { strategy: "rss:content-encoded", value: item["content:encoded"] },
+      { strategy: "rss:summary", value: item.summary },
+      { strategy: "rss:dc-description", value: item["dc:description"] },
+      { strategy: "rss:atom-content", value: item.content },
+      { strategy: "rss:prism-teaser", value: item["prism:teaser"] }
+    ],
+    "rss:item"
+  ).abstract;
   const publishedAt = toIsoDate(
     xmlValueToText(item.pubDate) || xmlValueToText(item["dc:date"]) || xmlValueToText(item.updated)
   );
@@ -62,9 +71,15 @@ function parseRssItem(item: Record<string, unknown>, source: SourceConfig): Fetc
 
 function parseAtomItem(entry: Record<string, unknown>, source: SourceConfig): FetchedPaper {
   const title = stripHtml(xmlValueToText(entry.title));
-  const abstract = stripHtml(
-    xmlValueToText(entry.summary) || xmlValueToText(entry.content) || xmlValueToText(entry.description)
-  );
+  const abstract = pickBestAbstract(
+    [
+      { strategy: "atom:summary", value: entry.summary },
+      { strategy: "atom:content", value: entry.content },
+      { strategy: "atom:description", value: entry.description },
+      { strategy: "atom:dc-description", value: entry["dc:description"] }
+    ],
+    "atom:entry"
+  ).abstract;
   const publishedAt = toIsoDate(xmlValueToText(entry.published) || xmlValueToText(entry.updated));
 
   const links = toArray(entry.link as unknown[]);

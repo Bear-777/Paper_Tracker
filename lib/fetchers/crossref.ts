@@ -1,5 +1,6 @@
 import { fetchJson } from "@/lib/http";
 import { SourceRequestError } from "@/lib/errors";
+import { cleanAbstractText } from "@/lib/abstract";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
 import { normalizeDoi, stripHtml, toIsoDate } from "@/lib/utils";
 
@@ -100,7 +101,7 @@ function toPaperFromCrossrefItem(item: CrossrefItem, sourceMeta: CrossrefSourceM
   const doi = normalizeDoi(item.DOI);
   const publishedAt = pickPublishedAt(item);
 
-  const abstract = item.abstract ? stripHtml(item.abstract) : "";
+  const abstract = item.abstract ? cleanAbstractText(item.abstract) : "";
   const url = item.URL || (doi ? `https://doi.org/${doi}` : "");
 
   return {

@@ -26,6 +26,24 @@
     "enabled": true
   },
   {
+    "id": "prx",
+    "label": "PRX",
+    "type": "rss",
+    "url": "http://feeds.aps.org/rss/recent/prx.xml",
+    "fallbackCrossrefIssn": "2160-3308",
+    "rows": 100,
+    "enabled": true
+  },
+  {
+    "id": "prx-quantum",
+    "label": "PRX Quantum",
+    "type": "rss",
+    "url": "http://feeds.aps.org/rss/recent/prxquantum.xml",
+    "fallbackCrossrefIssn": "2691-3399",
+    "rows": 100,
+    "enabled": true
+  },
+  {
     "id": "nature-physics",
     "label": "Nature Physics",
     "type": "rss",

@@ -13,6 +13,7 @@ export default async function HomePage(): Promise<JSX.Element> {
       initialUpdatedAt={aggregated.lastSuccessfulRefreshAt ?? ""}
       initialCurrentRefreshAttemptAt={aggregated.currentRefreshAttemptAt ?? ""}
       initialSourceViews={aggregated.sourceViews}
+      initialSourceDailyCounts={aggregated.sourceDailyCounts}
       initialTotalBeforeDedupe={aggregated.totalBeforeDedupe}
       sources={SOURCE_OPTIONS}
     />

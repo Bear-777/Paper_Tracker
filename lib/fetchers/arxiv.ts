@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 
+import { cleanAbstractText } from "@/lib/abstract";
 import { SourceRequestError } from "@/lib/errors";
 import { fetchText } from "@/lib/http";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
@@ -32,7 +33,7 @@ function pickArxivLink(linkNode: unknown, arxivId?: string): string {
 
 function parseArxivEntry(entry: Record<string, unknown>, source: SourceConfig): FetchedPaper | null {
   const title = stripHtml(xmlValueToText(entry.title));
-  const abstract = normalizeWhitespace(xmlValueToText(entry.summary));
+  const abstract = cleanAbstractText(xmlValueToText(entry.summary));
   const publishedAt = toIsoDate(xmlValueToText(entry.published) || xmlValueToText(entry.updated));
 
   const authors = toArray(entry.author as unknown[]).map((author) => {

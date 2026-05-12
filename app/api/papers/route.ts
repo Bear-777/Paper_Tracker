@@ -3,9 +3,11 @@ import { NextResponse } from "next/server";
 import { getAggregatedPapers } from "@/lib/cache";
 import { SOURCE_OPTIONS } from "@/lib/sources";
 import type { Paper } from "@/lib/types";
+import { isWithinUtcDayWindow } from "@/lib/utils";
 
 export const runtime = "nodejs";
 type SearchField = "all" | "title" | "authors" | "abstract";
+type TimeWindowDays = 1 | 3 | 7;
 
 function parseSourceFilter(raw: string | null): Set<string> | null {
   if (!raw) {
@@ -28,6 +30,14 @@ function parseSearchField(raw: string | null): SearchField {
   return "all";
 }
 
+function parseTimeWindowDays(raw: string | null): TimeWindowDays {
+  if (raw === "1" || raw === "3") {
+    return Number(raw) as TimeWindowDays;
+  }
+
+  return 7;
+}
+
 function paperMatchesQuery(paper: Paper, query: string, field: SearchField): boolean {
   const normalizedQuery = query.toLowerCase();
   const searchableByField: Record<SearchField, string> = {
@@ -47,8 +57,16 @@ export async function GET(request: Request): Promise<NextResponse> {
   const query = searchParams.get("q")?.trim() ?? "";
   const searchField = parseSearchField(searchParams.get("field"));
   const sort = searchParams.get("sort") === "asc" ? "asc" : "desc";
+  const timeWindowDays = parseTimeWindowDays(searchParams.get("days"));
   const aggregated = await getAggregatedPapers();
+  const refreshAnchorMs = new Date(
+    aggregated.currentRefreshAttemptAt ?? aggregated.lastSuccessfulRefreshAt ?? Date.now()
+  ).getTime();
   let papers = [...aggregated.papers];
+
+  if (!Number.isNaN(refreshAnchorMs)) {
+    papers = papers.filter((paper) => isWithinUtcDayWindow(paper.publishedAt, refreshAnchorMs, timeWindowDays));
+  }
 
   if (sourceFilter) {
     papers = papers.filter((paper) => sourceFilter.has(paper.sourceId));
@@ -82,8 +100,10 @@ export async function GET(request: Request): Promise<NextResponse> {
     totalBeforeDedupe: aggregated.totalBeforeDedupe,
     total: papers.length,
     searchField,
+    timeWindowDays,
     papers,
     sourceViews: aggregated.sourceViews,
+    sourceDailyCounts: aggregated.sourceDailyCounts,
     sources: SOURCE_OPTIONS
   });
 }

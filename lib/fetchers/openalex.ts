@@ -1,5 +1,6 @@
 import { SourceRequestError } from "@/lib/errors";
 import { fetchWithRetry } from "@/lib/http";
+import { cleanAbstractText } from "@/lib/abstract";
 import { normalizeDoi, stripHtml } from "@/lib/utils";
 
 interface OpenAlexAuthorship {
@@ -55,7 +56,7 @@ function invertedIndexToText(invertedIndex: Record<string, number[]> | undefined
     }
   }
 
-  return stripHtml(words.join(" ").replace(/\s+/g, " ").trim());
+  return cleanAbstractText(words.join(" ").replace(/\s+/g, " ").trim());
 }
 
 export async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexMetadata | null> {

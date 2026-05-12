@@ -1,10 +1,18 @@
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
 
+import {
+  cleanAbstractText,
+  debugAbstractExtraction,
+  fetchAbstractFromLandingPage,
+  isUsableAbstract,
+  type AbstractExtractionResult
+} from "@/lib/abstract";
 import { fetchArxivPapers } from "@/lib/fetchers/arxiv";
 import { fetchCrossrefByDoi, fetchCrossrefByIssn, fetchCrossrefPapers } from "@/lib/fetchers/crossref";
 import { resolveToCanonicalDoi } from "@/lib/fetchers/doi-resolver";
 import { fetchOpenAlexByDoi, type OpenAlexMetadata } from "@/lib/fetchers/openalex";
 import { fetchRssPapers } from "@/lib/fetchers/rss";
+import { fetchSemanticScholarByDoi, type SemanticScholarMetadata } from "@/lib/fetchers/semantic-scholar";
 import { hasMarkupArtifacts, isLikelyShortDoi, normalizeDoi, normalizeTitleForMatch, stripHtml } from "@/lib/utils";
 
 const METADATA_ENRICH_CONCURRENCY = Number(process.env.METADATA_ENRICH_CONCURRENCY ?? 3);
@@ -12,6 +20,8 @@ const METADATA_ENRICH_CONCURRENCY = Number(process.env.METADATA_ENRICH_CONCURREN
 interface DoiMetadataBundle {
   crossref: FetchedPaper | null;
   openalex: OpenAlexMetadata | null;
+  semanticScholar: SemanticScholarMetadata | null;
+  landingPage: AbstractExtractionResult | null;
 }
 
 function hasUsableAuthors(authors: string[]): boolean {
@@ -23,7 +33,7 @@ function hasUsableAuthors(authors: string[]): boolean {
 }
 
 function hasUsableAbstract(abstractText: string): boolean {
-  return abstractText.trim().length >= 60;
+  return isUsableAbstract(abstractText);
 }
 
 function needsTitleCleanup(title: string): boolean {
@@ -34,14 +44,18 @@ function mergePaperWithBundle(paper: FetchedPaper, bundle: DoiMetadataBundle | u
   if (!bundle) {
     return {
       ...paper,
-      title: stripHtml(paper.title)
+      title: stripHtml(paper.title),
+      abstract: cleanAbstractText(paper.abstract)
     };
   }
 
   const fromCrossref = bundle.crossref;
   const fromOpenAlex = bundle.openalex;
+  const fromSemanticScholar = bundle.semanticScholar;
+  const fromLandingPage = bundle.landingPage;
   const merged: FetchedPaper = {
-    ...paper
+    ...paper,
+    abstract: cleanAbstractText(paper.abstract)
   };
 
   if (fromCrossref) {
@@ -86,6 +100,36 @@ function mergePaperWithBundle(paper: FetchedPaper, bundle: DoiMetadataBundle | u
     if (!merged.doi || isLikelyShortDoi(merged.doi)) {
       merged.doi = fromOpenAlex.doi ?? merged.doi;
     }
+  }
+
+  if (fromSemanticScholar) {
+    if (!hasUsableAbstract(merged.abstract) && hasUsableAbstract(fromSemanticScholar.abstract ?? "")) {
+      merged.abstract = fromSemanticScholar.abstract ?? merged.abstract;
+    }
+
+    if (!hasUsableAuthors(merged.authors) && hasUsableAuthors(fromSemanticScholar.authors ?? [])) {
+      merged.authors = fromSemanticScholar.authors ?? merged.authors;
+    }
+
+    if (needsTitleCleanup(merged.title) && fromSemanticScholar.title) {
+      merged.title = fromSemanticScholar.title;
+    }
+
+    if (!merged.url && fromSemanticScholar.url) {
+      merged.url = fromSemanticScholar.url;
+    }
+
+    if (!merged.doi || isLikelyShortDoi(merged.doi)) {
+      merged.doi = fromSemanticScholar.doi ?? merged.doi;
+    }
+
+    if (!merged.arxivId && fromSemanticScholar.arxivId) {
+      merged.arxivId = fromSemanticScholar.arxivId;
+    }
+  }
+
+  if (fromLandingPage && !hasUsableAbstract(merged.abstract) && hasUsableAbstract(fromLandingPage.abstract)) {
+    merged.abstract = fromLandingPage.abstract;
   }
 
   merged.title = stripHtml(merged.title);
@@ -201,6 +245,8 @@ async function enrichMissingMetadataByDoi(source: SourceConfig, papers: FetchedP
     };
     let fromCrossref: FetchedPaper | null = null;
     let fromOpenAlex: OpenAlexMetadata | null = null;
+    let fromSemanticScholar: SemanticScholarMetadata | null = null;
+    let fromLandingPage: AbstractExtractionResult | null = null;
 
     try {
       fromCrossref = await fetchCrossrefByDoi(lookupDoi, sourceMeta);
@@ -219,11 +265,46 @@ async function enrichMissingMetadataByDoi(source: SourceConfig, papers: FetchedP
       }
     }
 
+    const stillMissingAfterOpenAlex =
+      (!fromCrossref || !hasUsableAbstract(fromCrossref.abstract)) &&
+      (!fromOpenAlex || !hasUsableAbstract(fromOpenAlex.abstract ?? ""));
+
+    if (stillMissingAfterOpenAlex) {
+      try {
+        fromSemanticScholar = await fetchSemanticScholarByDoi(lookupDoi);
+      } catch {
+        fromSemanticScholar = null;
+      }
+    }
+
+    const stillMissingAfterSemanticScholar =
+      stillMissingAfterOpenAlex && (!fromSemanticScholar || !hasUsableAbstract(fromSemanticScholar.abstract ?? ""));
+
+    if (stillMissingAfterSemanticScholar) {
+      fromLandingPage = await fetchAbstractFromLandingPage(
+        fromOpenAlex?.url ?? fromCrossref?.url ?? fromSemanticScholar?.url ?? `https://doi.org/${lookupDoi}`,
+        { doi: lookupDoi, sourceId: source.id }
+      );
+    }
+
+    debugAbstractExtraction("doi-metadata-enrichment", {
+      sourceId: source.id,
+      doi,
+      lookupDoi,
+      crossrefAbstract: Boolean(fromCrossref && hasUsableAbstract(fromCrossref.abstract)),
+      openAlexAbstract: Boolean(fromOpenAlex && hasUsableAbstract(fromOpenAlex.abstract ?? "")),
+      semanticScholarAbstract: Boolean(fromSemanticScholar && hasUsableAbstract(fromSemanticScholar.abstract ?? "")),
+      landingPageStrategy: fromLandingPage?.strategy,
+      landingPageFailure: fromLandingPage?.failureReason
+    });
+
     return {
       doi,
       bundle: {
         crossref: fromCrossref,
-        openalex: fromOpenAlex
+        openalex: fromOpenAlex,
+        semanticScholar: fromSemanticScholar,
+        landingPage: fromLandingPage
       } satisfies DoiMetadataBundle
     };
   });
@@ -240,7 +321,8 @@ async function enrichMissingMetadataByDoi(source: SourceConfig, papers: FetchedP
     if (!doi) {
       return {
         ...paper,
-        title: stripHtml(paper.title)
+        title: stripHtml(paper.title),
+        abstract: cleanAbstractText(paper.abstract)
       };
     }
 

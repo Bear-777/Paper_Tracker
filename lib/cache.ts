@@ -2,18 +2,28 @@ import { dedupePapers } from "@/lib/dedupe";
 import { SourceRequestError } from "@/lib/errors";
 import { fetchBySource } from "@/lib/fetchers";
 import { ENABLED_SOURCES } from "@/lib/sources";
+import { cleanAbstractText } from "@/lib/abstract";
 import type {
   AggregatedResult,
   FetchedPaper,
   SourceCacheRecord,
   SourceCacheState,
   SourceConfig,
+  SourceDailyCount,
   SourceErrorInfo,
   SourceStatus,
   SourceType,
   SourceView
 } from "@/lib/types";
-import { buildFromDate, isWithinLast7Days, normalizeWhitespace, stripHtml, toErrorMessage, toIsoDate } from "@/lib/utils";
+import {
+  buildFromDate,
+  getUtcWindowStartMs,
+  isWithinLast7Days,
+  normalizeWhitespace,
+  stripHtml,
+  toErrorMessage,
+  toIsoDate
+} from "@/lib/utils";
 
 const SOURCE_REFRESH_CONCURRENCY = Number(process.env.SOURCE_REFRESH_CONCURRENCY ?? 3);
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS ?? 30 * 60 * 1000);
@@ -74,7 +84,7 @@ function normalizeArticle(paper: FetchedPaper, source: SourceConfig, refreshAtte
     .map((author) => normalizeWhitespace(author))
     .filter((author) => author.length > 0);
   const normalizedUrl = normalizeWhitespace(paper.url || "");
-  const normalizedAbstract = normalizeWhitespace(stripHtml(paper.abstract || ""));
+  const normalizedAbstract = cleanAbstractText(paper.abstract || "");
 
   if (!normalizedPublished) {
     return null;
@@ -323,6 +333,59 @@ function toSourceViews(state: SourceCacheState): SourceView[] {
     .sort((left, right) => left.sourceLabel.localeCompare(right.sourceLabel));
 }
 
+function getRefreshAnchorMs(state: SourceCacheState): number {
+  const parsed = new Date(state.currentRefreshAttemptAt ?? state.lastSuccessfulRefreshAt ?? Date.now()).getTime();
+
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+function buildUtcDateWindow(anchorMs: number): string[] {
+  const startMs = getUtcWindowStartMs(anchorMs, 7);
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(startMs + index * 24 * 60 * 60 * 1000);
+
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+function toSourceDailyCounts(state: SourceCacheState): SourceDailyCount[] {
+  const anchorMs = getRefreshAnchorMs(state);
+  const dates = buildUtcDateWindow(anchorMs);
+  const dateSet = new Set(dates);
+
+  return Object.values(state.sources)
+    .map((source) => {
+      const countsByDate = new Map(dates.map((date) => [date, 0]));
+
+      for (const article of source.articles) {
+        const publishedMs = new Date(article.publishedAt).getTime();
+
+        if (Number.isNaN(publishedMs) || publishedMs > anchorMs) {
+          continue;
+        }
+
+        const date = new Date(publishedMs).toISOString().slice(0, 10);
+
+        if (!dateSet.has(date)) {
+          continue;
+        }
+
+        countsByDate.set(date, (countsByDate.get(date) ?? 0) + 1);
+      }
+
+      return {
+        sourceId: source.sourceId,
+        sourceLabel: source.sourceLabel,
+        counts: dates.map((date) => ({
+          date,
+          count: countsByDate.get(date) ?? 0
+        }))
+      };
+    })
+    .sort((left, right) => left.sourceLabel.localeCompare(right.sourceLabel));
+}
+
 function aggregateFromState(state: SourceCacheState): AggregatedResult {
   const allArticles = Object.values(state.sources).flatMap((source) => source.articles);
   const papers = dedupePapers(allArticles);
@@ -331,6 +394,7 @@ function aggregateFromState(state: SourceCacheState): AggregatedResult {
     papers,
     totalBeforeDedupe: allArticles.length,
     sourceViews: toSourceViews(state),
+    sourceDailyCounts: toSourceDailyCounts(state),
     currentRefreshAttemptAt: state.currentRefreshAttemptAt,
     lastSuccessfulRefreshAt: state.lastSuccessfulRefreshAt
   };
