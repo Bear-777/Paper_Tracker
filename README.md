@@ -38,10 +38,18 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
   - Dark Quantum Background for low-light research sessions
 - Weekly Source Trends view:
   - Counts each source's cached articles per UTC day across the current 7-day cache window.
+  - Shows arXiv quant-ph separately from journal sources so journal trends are not compressed by arXiv volume.
+  - Each chart uses its own integer y-axis scale with compact, readable tick intervals.
   - Uses the existing source cache only and does not issue extra external API requests.
 - Favorites view:
   - Paper cards include a local Save/Saved button.
   - Saved papers persist in browser `localStorage` under `physics-paper-hub-favorites`.
+- Back to Top button:
+  - Appears after scrolling beyond 300px.
+  - Smoothly returns to the top of the page.
+- Home scroll restoration:
+  - Leaving the Physics Papers Hub home view saves the current homepage scroll position.
+  - Returning from Weekly Source Trends or Favorites restores the homepage reading position in the current browser session.
 - Sort by publication time (newest/oldest).
 - Each paper card shows title, authors, abstract, source, date, DOI/arXiv ID, and missing metadata hints.
 - `POST /api/refresh` soft refresh with source-level independent cache.

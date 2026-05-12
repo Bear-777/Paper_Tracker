@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Paper, SourceDailyCount, SourceView } from "@/lib/types";
 import { isWithinUtcDayWindow } from "@/lib/utils";
@@ -13,6 +13,9 @@ type ActiveView = "home" | "trends" | "favorites";
 
 const BACKGROUND_THEME_STORAGE_KEY = "physics-paper-hub-background-theme";
 const FAVORITES_STORAGE_KEY = "physics-paper-hub-favorites";
+const HOME_SCROLL_STORAGE_KEY = "physics-paper-hub-home-scroll-y";
+const BACK_TO_TOP_THRESHOLD_PX = 300;
+const ARXIV_SOURCE_ID = "arxiv-quant-ph";
 
 const TIME_WINDOW_OPTIONS: { days: TimeWindowDays; label: string }[] = [
   { days: 7, label: "Past 7 UTC days" },
@@ -54,6 +57,15 @@ interface PaperDashboardProps {
   initialSourceDailyCounts: SourceDailyCount[];
   initialTotalBeforeDedupe: number;
   sources: SourceOption[];
+}
+
+interface TrendChartOptions {
+  title: string;
+  note: string;
+  emptyMessage: string;
+  ariaLabel: string;
+  sources: SourceDailyCount[];
+  colorOffset?: number;
 }
 
 function formatDate(isoDate: string): string {
@@ -210,6 +222,50 @@ function getTrendDates(sourceDailyCounts: SourceDailyCount[]): string[] {
   return sourceDailyCounts[0]?.counts.map((entry) => entry.date) ?? [];
 }
 
+function getTrendMaxCount(sourceDailyCounts: SourceDailyCount[]): number {
+  return Math.max(
+    0,
+    ...sourceDailyCounts.flatMap((source) => source.counts.map((entry) => entry.count))
+  );
+}
+
+function getNiceTrendInterval(maxCount: number): number {
+  if (maxCount <= 5) {
+    return 1;
+  }
+
+  if (maxCount <= 10) {
+    return 2;
+  }
+
+  const roughInterval = maxCount / 7;
+  const magnitude = 10 ** Math.floor(Math.log10(roughInterval));
+  const normalized = roughInterval / magnitude;
+
+  if (normalized <= 1) {
+    return Math.max(1, magnitude);
+  }
+
+  if (normalized <= 2) {
+    return Math.max(1, 2 * magnitude);
+  }
+
+  if (normalized <= 5) {
+    return Math.max(1, 5 * magnitude);
+  }
+
+  return Math.max(1, 10 * magnitude);
+}
+
+function buildTrendTicks(maxCount: number): number[] {
+  const roundedMax = Math.max(0, Math.ceil(maxCount));
+  const interval = getNiceTrendInterval(roundedMax);
+  const domainMax = Math.max(interval, Math.ceil(roundedMax / interval) * interval);
+  const tickCount = Math.floor(domainMax / interval) + 1;
+
+  return Array.from({ length: tickCount }, (_, index) => index * interval);
+}
+
 function formatTrendDate(date: string): string {
   const parsed = new Date(`${date}T00:00:00.000Z`);
 
@@ -222,6 +278,37 @@ function formatTrendDate(date: string): string {
     day: "numeric",
     timeZone: "UTC"
   }).format(parsed);
+}
+
+function getStoredScrollPosition(): number | null {
+  const stored = window.sessionStorage.getItem(HOME_SCROLL_STORAGE_KEY);
+  const parsed = stored ? Number(stored) : Number.NaN;
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function getMaxScrollY(): number {
+  return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+}
+
+interface BackToTopButtonProps {
+  visible: boolean;
+  onClick: () => void;
+}
+
+function BackToTopButton({ visible, onClick }: BackToTopButtonProps): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`back-to-top ${visible ? "is-visible" : ""}`}
+      aria-label="Back to top"
+      aria-hidden={!visible}
+      tabIndex={visible ? 0 : -1}
+      onClick={onClick}
+    >
+      Top
+    </button>
+  );
 }
 
 export default function PaperDashboard(props: PaperDashboardProps): JSX.Element {
@@ -252,6 +339,17 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [favoritePapers, setFavoritePapers] = useState<Record<string, Paper>>({});
   const [favoritesHydrated, setFavoritesHydrated] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+  const activeViewRef = useRef<ActiveView>("home");
+  const homeScrollPositionRef = useRef(0);
+  const shouldRestoreHomeScrollRef = useRef(false);
+
+  function saveHomeScrollPosition(): void {
+    const scrollY = Math.max(0, Math.round(window.scrollY));
+
+    homeScrollPositionRef.current = scrollY;
+    window.sessionStorage.setItem(HOME_SCROLL_STORAGE_KEY, String(scrollY));
+  }
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem(BACKGROUND_THEME_STORAGE_KEY);
@@ -277,6 +375,81 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
 
     window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Object.values(favoritePapers)));
   }, [favoritePapers, favoritesHydrated]);
+
+  useEffect(() => {
+    activeViewRef.current = activeView;
+  }, [activeView]);
+
+  useEffect(() => {
+    let frameId = 0;
+
+    function updateScrollState(): void {
+      frameId = 0;
+
+      const scrollY = Math.max(0, Math.round(window.scrollY));
+
+      setShowBackToTop(scrollY > BACK_TO_TOP_THRESHOLD_PX);
+
+      if (activeViewRef.current === "home") {
+        homeScrollPositionRef.current = scrollY;
+        window.sessionStorage.setItem(HOME_SCROLL_STORAGE_KEY, String(scrollY));
+      }
+    }
+
+    function onScroll(): void {
+      if (frameId !== 0) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(updateScrollState);
+    }
+
+    updateScrollState();
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeView !== "home" || !shouldRestoreHomeScrollRef.current) {
+      return;
+    }
+
+    shouldRestoreHomeScrollRef.current = false;
+
+    const storedScrollY = getStoredScrollPosition();
+    const targetScrollY = homeScrollPositionRef.current || storedScrollY || 0;
+    let frameId = 0;
+    let attempts = 0;
+
+    function restoreScrollPosition(): void {
+      attempts += 1;
+
+      const maxScrollY = getMaxScrollY();
+      window.scrollTo({
+        top: Math.min(targetScrollY, maxScrollY),
+        behavior: "auto"
+      });
+
+      if (attempts < 8 && maxScrollY < targetScrollY) {
+        frameId = window.requestAnimationFrame(restoreScrollPosition);
+      }
+    }
+
+    frameId = window.requestAnimationFrame(restoreScrollPosition);
+
+    return () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [activeView]);
 
   const filteredPapers = useMemo(() => {
     const sourceSet = new Set(selectedSourceIds);
@@ -334,15 +507,14 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   );
 
   const trendDates = useMemo(() => getTrendDates(sourceDailyCounts), [sourceDailyCounts]);
-  const maxTrendCount = useMemo(
-    () =>
-      Math.max(
-        0,
-        ...sourceDailyCounts.flatMap((source) => source.counts.map((entry) => entry.count))
-      ),
+  const arxivTrendSources = useMemo(
+    () => sourceDailyCounts.filter((source) => source.sourceId === ARXIV_SOURCE_ID),
     [sourceDailyCounts]
   );
-  const hasTrendData = maxTrendCount > 0;
+  const journalTrendSources = useMemo(
+    () => sourceDailyCounts.filter((source) => source.sourceId !== ARXIV_SOURCE_ID),
+    [sourceDailyCounts]
+  );
 
   function toggleSource(id: string): void {
     setSelectedSourceIds((current) =>
@@ -355,8 +527,26 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   }
 
   function selectView(view: ActiveView): void {
+    if (activeView === "home" && view !== "home") {
+      saveHomeScrollPosition();
+    }
+
+    if (activeView !== "home" && view === "home") {
+      shouldRestoreHomeScrollRef.current = true;
+    }
+
+    activeViewRef.current = view;
     setActiveView(view);
     setIsSidebarOpen(false);
+  }
+
+  function scrollToPageTop(): void {
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    window.scrollTo({
+      top: 0,
+      behavior: prefersReducedMotion ? "auto" : "smooth"
+    });
   }
 
   function toggleFavorite(paper: Paper): void {
@@ -487,34 +677,38 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     );
   }
 
-  function renderTrendChart(): JSX.Element {
+  function renderTrendSeriesChart(options: TrendChartOptions): JSX.Element {
+    const { title, note, emptyMessage, ariaLabel, sources: trendSources, colorOffset = 0 } = options;
     const chartWidth = 840;
     const chartHeight = 320;
     const padding = { top: 24, right: 28, bottom: 52, left: 42 };
     const plotWidth = chartWidth - padding.left - padding.right;
     const plotHeight = chartHeight - padding.top - padding.bottom;
-    const safeMax = Math.max(1, maxTrendCount);
+    const maxCount = getTrendMaxCount(trendSources);
+    const hasData = trendSources.length > 0 && maxCount > 0;
+    const yTicks = buildTrendTicks(maxCount);
+    const yAxisMax = yTicks[yTicks.length - 1] ?? 1;
+    const safeMax = Math.max(1, yAxisMax);
     const xForIndex = (index: number) =>
       padding.left + (trendDates.length <= 1 ? plotWidth / 2 : (plotWidth / (trendDates.length - 1)) * index);
     const yForCount = (count: number) => padding.top + plotHeight - (count / safeMax) * plotHeight;
-    const yTicks = Array.from(new Set([0, Math.ceil(safeMax / 2), safeMax])).sort((left, right) => left - right);
 
     return (
       <section className="card trends-card">
         <div className="section-heading">
           <div>
-            <h2>Weekly Source Trends</h2>
+            <h2>{title}</h2>
             <p>Daily article counts by source from the current 7-day UTC cache window.</p>
           </div>
         </div>
 
-        {sourceDailyCounts.length === 0 ? (
-          <p className="empty-state">No cached source trend data is available yet. Refresh data to populate trends.</p>
+        {!hasData ? (
+          <p className="empty-state">{emptyMessage}</p>
         ) : (
           <>
-            <div className="trend-chart-wrap" aria-label="Weekly source trends chart">
+            <div className="trend-chart-wrap" aria-label={ariaLabel}>
               <svg className="trend-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img">
-                <title>Weekly source trends</title>
+                <title>{title}</title>
                 {yTicks.map((tick) => {
                   const y = yForCount(tick);
 
@@ -540,8 +734,8 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                   </text>
                 ))}
 
-                {sourceDailyCounts.map((source, sourceIndex) => {
-                  const color = TREND_COLORS[sourceIndex % TREND_COLORS.length];
+                {trendSources.map((source, sourceIndex) => {
+                  const color = TREND_COLORS[(sourceIndex + colorOffset) % TREND_COLORS.length];
                   const points = source.counts
                     .map((entry, index) => `${xForIndex(index)},${yForCount(entry.count)}`)
                     .join(" ");
@@ -557,7 +751,12 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                           cy={yForCount(entry.count)}
                           r={entry.count > 0 ? 3.6 : 2.4}
                           fill={color}
-                        />
+                        >
+                          <title>
+                            {formatTrendDate(entry.date)} - {source.sourceLabel}: {entry.count}{" "}
+                            {entry.count === 1 ? "article" : "articles"}
+                          </title>
+                        </circle>
                       ))}
                     </g>
                   );
@@ -565,18 +764,58 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
               </svg>
             </div>
 
-            {!hasTrendData ? <p className="empty-state">No articles were found in the current 7-day UTC window.</p> : null}
-
             <div className="trend-legend">
-              {sourceDailyCounts.map((source, index) => (
+              {trendSources.map((source, index) => (
                 <span key={source.sourceId} className="trend-legend-item">
-                  <span className="trend-swatch" style={{ backgroundColor: TREND_COLORS[index % TREND_COLORS.length] }} />
+                  <span
+                    className="trend-swatch"
+                    style={{ backgroundColor: TREND_COLORS[(index + colorOffset) % TREND_COLORS.length] }}
+                  />
                   {source.sourceLabel}
                 </span>
               ))}
             </div>
           </>
         )}
+
+        <p className="trend-note">{note}</p>
+      </section>
+    );
+  }
+
+  function renderTrendChart(): JSX.Element {
+    if (sourceDailyCounts.length === 0) {
+      return (
+        <section className="card trends-card">
+          <div className="section-heading">
+            <div>
+              <h2>Weekly Source Trends</h2>
+              <p>Daily article counts by source from the current 7-day UTC cache window.</p>
+            </div>
+          </div>
+          <p className="empty-state">No cached source trend data is available yet. Refresh data to populate trends.</p>
+        </section>
+      );
+    }
+
+    return (
+      <section className="trends-view">
+        {renderTrendSeriesChart({
+          title: "arXiv quant-ph Trend",
+          note: "arXiv usually has a larger daily volume, so it is shown separately.",
+          emptyMessage: "No arXiv data in the current cache window.",
+          ariaLabel: "arXiv quant-ph 7-day trend chart",
+          sources: arxivTrendSources
+        })}
+
+        {renderTrendSeriesChart({
+          title: "Journal Sources Trend",
+          note: "Journal sources are plotted on a separate scale for easier comparison.",
+          emptyMessage: "No journal data in the current cache window.",
+          ariaLabel: "Journal sources 7-day trend chart",
+          sources: journalTrendSources,
+          colorOffset: 1
+        })}
       </section>
     );
   }
@@ -635,6 +874,8 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
           <strong>7 UTC days</strong>
         </div>
       </aside>
+
+      <BackToTopButton visible={showBackToTop} onClick={scrollToPageTop} />
 
       <main className="page-shell">
         <section className="hero">

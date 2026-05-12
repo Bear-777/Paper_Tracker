@@ -1,6 +1,6 @@
 ﻿# Project Memory: Physics Papers Hub
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
 
 ## Conversation Memory (Latest)
@@ -16,6 +16,7 @@ Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
   - Physics Papers Hub
   - Weekly Source Trends
   - Favorites
+- Latest interaction polish added a Back to Top button and homepage scroll restoration when moving between sidebar views.
 
 ## Root Causes and Fixes Applied
 
@@ -63,11 +64,18 @@ Fix:
 - Weekly Source Trends:
   - data comes from `sourceDailyCounts` in the existing aggregate/cache response
   - counts cached source articles per UTC day for the current 7-day window
+  - `arxiv-quant-ph` is plotted in its own chart
+  - all non-arXiv journal sources are plotted in a separate chart with an independent integer y-axis scale
   - does not trigger new external API requests
 - Favorites:
   - local-only minimal implementation using browser `localStorage`
   - storage key: `physics-paper-hub-favorites`
   - paper cards show Save/Saved, and Favorites displays only saved papers
+- Reading-position UX:
+  - Back to Top appears after 300px of page scroll
+  - homepage scroll is saved separately in `sessionStorage`
+  - storage key: `physics-paper-hub-home-scroll-y`
+  - switching from Favorites or Weekly Source Trends back to the home view restores the previous homepage scroll position
 - Stable dedupe and deterministic sorting.
 - Source-level soft refresh with stale cache retention on failure.
 - PRX and PRX Quantum are configured like the other APS journals:

@@ -1,6 +1,6 @@
 ﻿# Agent Context: Physics Papers Hub
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
 
 ## 1) Project Goal
@@ -43,10 +43,18 @@ Public-ready paper aggregation website (Next.js + TypeScript) for physics papers
   - Weekly Source Trends view:
     - reads `sourceDailyCounts` from the server response
     - displays per-source daily article counts across the current 7-day UTC cache window
+    - separates `arxiv-quant-ph` into its own chart and plots all journal sources on a second chart
+    - each chart computes its own 0-based integer y-axis ticks so arXiv volume does not compress journal curves
     - uses cached source articles only; no extra external API calls
   - Favorites view:
     - paper cards have a Save/Saved toggle
     - saved papers persist in browser `localStorage` under `physics-paper-hub-favorites`
+  - Back to Top button:
+    - appears after 300px of scrolling
+    - uses smooth scroll unless reduced-motion is requested
+  - Home scroll restoration:
+    - homepage scroll position is saved separately under `physics-paper-hub-home-scroll-y`
+    - returning from Weekly Source Trends or Favorites restores the previous homepage position
   - source status cards + warnings
 - Data quality:
   - dedupe priority: DOI > arXiv ID > canonical URL > normalized title fallback

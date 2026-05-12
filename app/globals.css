@@ -279,6 +279,49 @@ select {
   display: none;
 }
 
+.back-to-top {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem;
+  color: var(--accent-strong);
+  background: var(--card-solid);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(var(--backdrop-blur));
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.6rem);
+  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.back-to-top::before {
+  content: "";
+  width: 0.46rem;
+  height: 0.46rem;
+  border-top: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  transform: translateY(0.12rem) rotate(45deg);
+}
+
+.back-to-top:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.back-to-top.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
 a {
   color: var(--accent-strong);
   text-decoration: none;
@@ -436,6 +479,7 @@ a:hover {
 .menu-button:focus-visible,
 .sidebar-nav-item:focus-visible,
 .favorite-button:focus-visible,
+.back-to-top:focus-visible,
 .refresh-button:focus-visible,
 .source-actions button:focus-visible,
 .field input:focus-visible,
@@ -636,6 +680,11 @@ a:hover {
   color: var(--muted);
 }
 
+.trends-view {
+  display: grid;
+  gap: 1rem;
+}
+
 .trends-card {
   padding: 1rem;
 }
@@ -648,7 +697,7 @@ a:hover {
 
 .trend-chart {
   width: 100%;
-  min-width: 720px;
+  min-width: 0;
   height: auto;
   display: block;
 }
@@ -673,6 +722,7 @@ a:hover {
 .trend-point {
   stroke: var(--card-solid);
   stroke-width: 1.5;
+  cursor: help;
 }
 
 .trend-legend {
@@ -696,6 +746,12 @@ a:hover {
   border-radius: 999px;
 }
 
+.trend-note {
+  margin: 0.8rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .favorites-view {
   display: grid;
 }
@@ -703,6 +759,10 @@ a:hover {
 @media (prefers-reduced-motion: reduce) {
   .quantum-wave {
     animation: none;
+  }
+
+  .back-to-top {
+    transition: none;
   }
 }
 
@@ -773,6 +833,14 @@ a:hover {
     max-width: 1100px;
     margin: 0 auto;
     padding-top: 5.2rem;
+  }
+
+  .back-to-top {
+    right: 0.85rem;
+    bottom: 0.85rem;
+    min-height: 2.3rem;
+    padding: 0.48rem 0.68rem;
+    font-size: 0.92rem;
   }
 }
 
