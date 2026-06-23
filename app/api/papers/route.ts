@@ -51,9 +51,15 @@ function paperMatchesQuery(paper: Paper, query: string, field: SearchField): boo
   return searchable.includes(normalizedQuery);
 }
 
+function parseTopicFilter(raw: string | null): Set<string> | null {
+  return parseSourceFilter(raw);
+}
+
 export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const sourceFilter = parseSourceFilter(searchParams.get("source"));
+  const topicFilter = parseTopicFilter(searchParams.get("topic"));
+  const classificationStatus = searchParams.get("classificationStatus");
   const query = searchParams.get("q")?.trim() ?? "";
   const searchField = parseSearchField(searchParams.get("field"));
   const sort = searchParams.get("sort") === "asc" ? "asc" : "desc";
@@ -70,6 +76,18 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   if (sourceFilter) {
     papers = papers.filter((paper) => sourceFilter.has(paper.sourceId));
+  }
+
+  if (topicFilter) {
+    papers = papers.filter((paper) => paper.topics.some((topic) => topicFilter.has(topic.topicId)));
+  }
+
+  if (
+    classificationStatus === "pending" ||
+    classificationStatus === "low_confidence" ||
+    classificationStatus === "failed"
+  ) {
+    papers = papers.filter((paper) => paper.classificationStatus === classificationStatus);
   }
 
   if (query) {
@@ -104,6 +122,10 @@ export async function GET(request: Request): Promise<NextResponse> {
     papers,
     sourceViews: aggregated.sourceViews,
     sourceDailyCounts: aggregated.sourceDailyCounts,
+    topics: aggregated.topics,
+    latestRefreshRun: aggregated.latestRefreshRun,
+    nextScheduledRefreshAt: aggregated.nextScheduledRefreshAt,
+    persistenceMode: aggregated.persistenceMode,
     sources: SOURCE_OPTIONS
   });
 }

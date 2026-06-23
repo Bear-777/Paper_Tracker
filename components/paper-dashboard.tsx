@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { Paper, SourceDailyCount, SourceView } from "@/lib/types";
+import type {
+  Paper,
+  RefreshRun,
+  SourceDailyCount,
+  SourceView,
+  TopicDefinition
+} from "@/lib/types";
 import { isWithinUtcDayWindow } from "@/lib/utils";
 
 type SortOrder = "desc" | "asc";
@@ -10,6 +16,7 @@ type SearchScope = "all" | "title" | "authors" | "abstract";
 type TimeWindowDays = 1 | 3 | 7;
 type BackgroundTheme = "light" | "dark";
 type ActiveView = "home" | "trends" | "favorites";
+type ClassificationFilter = "all" | "uncertain";
 
 const BACKGROUND_THEME_STORAGE_KEY = "physics-paper-hub-background-theme";
 const FAVORITES_STORAGE_KEY = "physics-paper-hub-favorites";
@@ -56,6 +63,10 @@ interface PaperDashboardProps {
   initialSourceViews: SourceView[];
   initialSourceDailyCounts: SourceDailyCount[];
   initialTotalBeforeDedupe: number;
+  initialTopics: TopicDefinition[];
+  initialLatestRefreshRun?: RefreshRun;
+  initialNextScheduledRefreshAt: string;
+  initialPersistenceMode: "postgres" | "memory";
   sources: SourceOption[];
 }
 
@@ -191,7 +202,11 @@ function parseStoredFavorites(raw: string | null): Record<string, Paper> {
         const paper = item as Paper;
 
         if (typeof paper.id === "string") {
-          accumulator[paper.id] = paper;
+          accumulator[paper.id] = {
+            ...paper,
+            topics: Array.isArray(paper.topics) ? paper.topics : [],
+            classificationStatus: paper.classificationStatus ?? "pending"
+          };
         }
       }
 
@@ -319,6 +334,10 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     initialSourceViews,
     initialSourceDailyCounts,
     initialTotalBeforeDedupe,
+    initialTopics,
+    initialLatestRefreshRun,
+    initialNextScheduledRefreshAt,
+    initialPersistenceMode,
     sources
   } = props;
   const [papers, setPapers] = useState<Paper[]>(initialPapers);
@@ -332,6 +351,8 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   const [timeWindowDays, setTimeWindowDays] = useState<TimeWindowDays>(7);
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>(sources.map((source) => source.id));
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
+  const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [backgroundTheme, setBackgroundTheme] = useState<BackgroundTheme>("light");
@@ -340,6 +361,12 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   const [favoritePapers, setFavoritePapers] = useState<Record<string, Paper>>({});
   const [favoritesHydrated, setFavoritesHydrated] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [latestRefreshRun, setLatestRefreshRun] = useState<RefreshRun | undefined>(initialLatestRefreshRun);
+  const [nextScheduledRefreshAt, setNextScheduledRefreshAt] = useState(initialNextScheduledRefreshAt);
+  const [persistenceMode, setPersistenceMode] = useState<"postgres" | "memory">(initialPersistenceMode);
+  const [editingPaperId, setEditingPaperId] = useState<string | null>(null);
+  const [topicDraft, setTopicDraft] = useState<string[]>([]);
+  const [isSavingTopics, setIsSavingTopics] = useState(false);
   const activeViewRef = useRef<ActiveView>("home");
   const homeScrollPositionRef = useRef(0);
   const shouldRestoreHomeScrollRef = useRef(false);
@@ -459,6 +486,18 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     return papers
       .filter((paper) => isWithinUtcDayWindow(paper.publishedAt, refreshAnchorMs, timeWindowDays))
       .filter((paper) => sourceSet.has(paper.sourceId))
+      .filter(
+        (paper) =>
+          selectedTopicIds.length === 0 ||
+          paper.topics.some((topic) => selectedTopicIds.includes(topic.topicId))
+      )
+      .filter(
+        (paper) =>
+          classificationFilter === "all" ||
+          paper.classificationStatus === "pending" ||
+          paper.classificationStatus === "low_confidence" ||
+          paper.classificationStatus === "failed"
+      )
       .filter((paper) => {
         if (!normalizedQuery) {
           return true;
@@ -496,6 +535,8 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     papers,
     query,
     searchScope,
+    selectedTopicIds,
+    classificationFilter,
     selectedSourceIds,
     sortOrder,
     timeWindowDays
@@ -515,6 +556,24 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     () => sourceDailyCounts.filter((source) => source.sourceId !== ARXIV_SOURCE_ID),
     [sourceDailyCounts]
   );
+  const topicDailyCounts = useMemo<SourceDailyCount[]>(
+    () =>
+      initialTopics
+        .map((topic) => ({
+          sourceId: topic.id,
+          sourceLabel: topic.label,
+          counts: trendDates.map((date) => ({
+            date,
+            count: papers.filter(
+              (paper) =>
+                paper.publishedAt.slice(0, 10) === date &&
+                paper.topics.some((paperTopic) => paperTopic.topicId === topic.id)
+            ).length
+          }))
+        }))
+        .filter((topic) => topic.counts.some((entry) => entry.count > 0)),
+    [initialTopics, papers, trendDates]
+  );
 
   function toggleSource(id: string): void {
     setSelectedSourceIds((current) =>
@@ -524,6 +583,17 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
 
   function setAllSources(selected: boolean): void {
     setSelectedSourceIds(selected ? sources.map((source) => source.id) : []);
+  }
+
+  function toggleTopic(id: string): void {
+    setSelectedTopicIds((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+    );
+  }
+
+  function applyTopicShortcut(topicIds: string[], uncertain = false): void {
+    setSelectedTopicIds(topicIds);
+    setClassificationFilter(uncertain ? "uncertain" : "all");
   }
 
   function selectView(view: ActiveView): void {
@@ -569,13 +639,30 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     try {
       setIsRefreshing(true);
       setStatusText("");
+      let token = window.sessionStorage.getItem("physics-paper-hub-refresh-token") ?? undefined;
 
-      const response = await fetch("/api/refresh", {
+      let response = await fetch("/api/refresh", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
         }
       });
+
+      if (response.status === 401 && !token) {
+        token = window.prompt("Refresh token") ?? undefined;
+
+        if (token) {
+          window.sessionStorage.setItem("physics-paper-hub-refresh-token", token);
+          response = await fetch("/api/refresh", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            }
+          });
+        }
+      }
 
       const payload = (await response.json()) as {
         papers?: Paper[];
@@ -585,6 +672,9 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
         sourceViews?: SourceView[];
         sourceDailyCounts?: SourceDailyCount[];
         totalBeforeDedupe?: number;
+        latestRefreshRun?: RefreshRun;
+        nextScheduledRefreshAt?: string;
+        persistenceMode?: "postgres" | "memory";
         error?: string;
       };
 
@@ -599,11 +689,93 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
       setSourceViews(payload.sourceViews ?? []);
       setSourceDailyCounts(payload.sourceDailyCounts ?? []);
       setTotalBeforeDedupe(payload.totalBeforeDedupe ?? payload.papers?.length ?? 0);
+      setLatestRefreshRun(payload.latestRefreshRun);
+      setNextScheduledRefreshAt(payload.nextScheduledRefreshAt ?? nextScheduledRefreshAt);
+      setPersistenceMode(payload.persistenceMode ?? persistenceMode);
       setStatusText("Data refreshed.");
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : "Refresh failed.");
     } finally {
       setIsRefreshing(false);
+    }
+  }
+
+  function beginTopicEdit(paper: Paper): void {
+    setEditingPaperId(paper.id);
+    setTopicDraft(paper.topics.map((topic) => topic.topicId));
+  }
+
+  function toggleTopicDraft(topicId: string): void {
+    setTopicDraft((current) =>
+      current.includes(topicId) ? current.filter((id) => id !== topicId) : [...current, topicId]
+    );
+  }
+
+  async function saveTopicCorrection(paperId: string, token?: string): Promise<boolean> {
+    const response = await fetch(`/api/papers/${paperId}/topics`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ topicIds: topicDraft })
+    });
+
+    if (response.status === 401 && !token) {
+      const provided = window.prompt("Admin token");
+
+      if (provided) {
+        window.sessionStorage.setItem("physics-paper-hub-admin-token", provided);
+
+        return saveTopicCorrection(paperId, provided);
+      }
+
+      return false;
+    }
+
+    const payload = (await response.json()) as {
+      topics?: Paper["topics"];
+      classificationStatus?: Paper["classificationStatus"];
+      classifiedAt?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !payload.topics) {
+      throw new Error(payload.error ?? "Unable to save topics.");
+    }
+
+    setPapers((current) =>
+      current.map((paper) =>
+        paper.id === paperId
+          ? {
+              ...paper,
+              topics: payload.topics ?? paper.topics,
+              classificationStatus: payload.classificationStatus ?? "classified",
+              classifierVersion: "manual",
+              classifiedAt: payload.classifiedAt
+            }
+          : paper
+      )
+    );
+    setEditingPaperId(null);
+
+    return true;
+  }
+
+  async function onSaveTopicCorrection(paperId: string): Promise<void> {
+    try {
+      setIsSavingTopics(true);
+      setStatusText("");
+      const token = window.sessionStorage.getItem("physics-paper-hub-admin-token") ?? undefined;
+      const saved = await saveTopicCorrection(paperId, token);
+
+      if (saved) {
+        setStatusText("Topics updated.");
+      }
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : "Unable to save topics.");
+    } finally {
+      setIsSavingTopics(false);
     }
   }
 
@@ -623,6 +795,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     const identifier = pickIdentifier(paper);
     const missingFields = getMissingFields(paper);
     const isFavorite = Boolean(favoritePapers[paper.id]);
+    const isEditingTopics = editingPaperId === paper.id;
 
     return (
       <article key={paper.id} className="paper-card card">
@@ -653,6 +826,60 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
             ? paper.authors.join(", ")
             : "Authors unavailable (upstream source metadata did not provide authors)."}
         </p>
+        <div className="paper-topics" aria-label="Paper topics">
+          {paper.topics.map((topic) => {
+            const definition = initialTopics.find((candidate) => candidate.id === topic.topicId);
+
+            return (
+              <span
+                key={topic.topicId}
+                className="topic-badge"
+                style={{ borderColor: definition?.color, color: definition?.color }}
+                title={`${Math.round(topic.confidence * 100)}% confidence via ${topic.method}${topic.reason ? `: ${topic.reason}` : ""}`}
+              >
+                {topic.topicLabel}
+                <span>{Math.round(topic.confidence * 100)}%</span>
+              </span>
+            );
+          })}
+          <span className={`classification-state state-${paper.classificationStatus}`}>
+            {paper.classificationStatus === "low_confidence"
+              ? "Review suggested"
+              : paper.classificationStatus}
+          </span>
+          <button type="button" className="topic-edit-button" onClick={() => beginTopicEdit(paper)}>
+            Edit topics
+          </button>
+        </div>
+
+        {isEditingTopics ? (
+          <div className="topic-editor">
+            <div className="topic-editor-grid">
+              {initialTopics.map((topic) => (
+                <label key={topic.id}>
+                  <input
+                    type="checkbox"
+                    checked={topicDraft.includes(topic.id)}
+                    onChange={() => toggleTopicDraft(topic.id)}
+                  />
+                  <span>{topic.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="topic-editor-actions">
+              <button
+                type="button"
+                onClick={() => onSaveTopicCorrection(paper.id)}
+                disabled={isSavingTopics}
+              >
+                {isSavingTopics ? "Saving..." : "Save topics"}
+              </button>
+              <button type="button" onClick={() => setEditingPaperId(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
         <p className="abstract">
           {paper.abstract || "Abstract unavailable (upstream source metadata did not provide abstract)."}
         </p>
@@ -816,6 +1043,15 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
           sources: journalTrendSources,
           colorOffset: 1
         })}
+
+        {renderTrendSeriesChart({
+          title: "Topic Trends",
+          note: "Multi-label papers are counted once in every assigned topic.",
+          emptyMessage: "No classified topic data is available in the current window.",
+          ariaLabel: "Paper topic 7-day trend chart",
+          sources: topicDailyCounts,
+          colorOffset: 2
+        })}
       </section>
     );
   }
@@ -959,12 +1195,25 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
 
           <div className="controls-row info-row">
             <p>Last successful refresh: {lastSuccessfulRefreshAt ? formatDate(lastSuccessfulRefreshAt) : "N/A"}</p>
+            <p>Next automatic refresh: {nextScheduledRefreshAt ? formatDate(nextScheduledRefreshAt) : "N/A"}</p>
+            <p>
+              Storage: {persistenceMode === "postgres" ? "Postgres" : "temporary memory"}
+            </p>
             <p>Current refresh attempt: {currentRefreshAttemptAt ? formatDate(currentRefreshAttemptAt) : "N/A"}</p>
             <p>
               Showing {filteredPapers.length} / {papers.length} papers in selected window (raw: {totalBeforeDedupe})
             </p>
             {statusText ? <p>{statusText}</p> : null}
           </div>
+
+          {latestRefreshRun ? (
+            <div className={`refresh-run-summary run-${latestRefreshRun.status}`}>
+              <strong>{latestRefreshRun.trigger === "automatic" ? "Automatic" : "Latest"} refresh</strong>
+              <span>{latestRefreshRun.status}</span>
+              <span>{latestRefreshRun.newPaperCount} new papers</span>
+              <span>{latestRefreshRun.sourceFailureCount} degraded sources</span>
+            </div>
+          ) : null}
 
           <fieldset className="source-grid">
             <legend>Sources</legend>
@@ -987,19 +1236,54 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
               </label>
             ))}
           </fieldset>
+
+          <fieldset className="topic-filter">
+            <legend>Topics</legend>
+            <div className="topic-shortcuts">
+              <button type="button" onClick={() => applyTopicShortcut([])}>
+                All topics
+              </button>
+              <button type="button" onClick={() => applyTopicShortcut(["quantum-information"])}>
+                Quantum information
+              </button>
+              <button type="button" onClick={() => applyTopicShortcut(["other"])}>
+                Unclassified
+              </button>
+              <button type="button" onClick={() => applyTopicShortcut([], true)}>
+                Low confidence
+              </button>
+            </div>
+            <div className="topic-options">
+              {initialTopics.map((topic) => (
+                <label key={topic.id} className="topic-option">
+                  <input
+                    type="checkbox"
+                    checked={selectedTopicIds.includes(topic.id)}
+                    onChange={() => toggleTopic(topic.id)}
+                  />
+                  <span className="topic-color" style={{ backgroundColor: topic.color }} />
+                  <span>{topic.label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </section>
 
         <section className="card status-card">
           <h2>Source status</h2>
           <div className="status-grid">
             {sourceViews.map((source) => (
-              <article key={source.sourceId} className="status-item">
+              <article
+                key={source.sourceId}
+                className={`status-item ${source.failureStreak >= 2 ? "has-repeated-failures" : ""}`}
+              >
                 <p>
                   <strong>{source.sourceLabel}</strong>
                 </p>
                 <p>Status: {sourceStatusLabel(source)}</p>
                 <p>Data mode: {dataModeLabel(source)}</p>
                 <p>Articles: {source.articleCount}</p>
+                {source.failureStreak > 0 ? <p>Consecutive degraded runs: {source.failureStreak}</p> : null}
                 <p>Last success: {source.lastSuccessAt ? formatDate(source.lastSuccessAt) : "N/A"}</p>
                 <p>Last attempt: {source.lastAttemptAt ? formatDate(source.lastAttemptAt) : "N/A"}</p>
               </article>

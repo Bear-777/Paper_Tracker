@@ -15,6 +15,10 @@ export default async function HomePage(): Promise<JSX.Element> {
       initialSourceViews={aggregated.sourceViews}
       initialSourceDailyCounts={aggregated.sourceDailyCounts}
       initialTotalBeforeDedupe={aggregated.totalBeforeDedupe}
+      initialTopics={aggregated.topics}
+      initialLatestRefreshRun={aggregated.latestRefreshRun}
+      initialNextScheduledRefreshAt={aggregated.nextScheduledRefreshAt ?? ""}
+      initialPersistenceMode={aggregated.persistenceMode}
       sources={SOURCE_OPTIONS}
     />
   );

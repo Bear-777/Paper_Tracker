@@ -1,0 +1,66 @@
+[
+  {
+    "id": "quantum-information",
+    "label": "Quantum Information",
+    "description": "Quantum information theory, entanglement, communication, cryptography, error correction, and resource theories.",
+    "color": "#256f7b",
+    "keywords": ["entanglement", "nonlocality", "cryptography", "teleportation", "coherence", "discord", "fidelity", "channel capacity", "resource theory"],
+    "phrases": ["quantum information", "quantum communication", "quantum network", "quantum key distribution", "quantum error correction", "quantum memory", "quantum channel"]
+  },
+  {
+    "id": "quantum-computing",
+    "label": "Quantum Computing",
+    "description": "Quantum algorithms, simulation, compilation, architectures, benchmarking, and computing hardware.",
+    "color": "#7559a6",
+    "keywords": ["qubit", "gate fidelity", "variational", "annealing", "circuit", "compiler", "benchmarking", "fault-tolerant", "quantum advantage"],
+    "phrases": ["quantum computing", "quantum computer", "quantum algorithm", "quantum simulation", "quantum processor", "quantum circuit"]
+  },
+  {
+    "id": "quantum-optics",
+    "label": "Quantum Optics & Photonics",
+    "description": "Quantum light, photonic systems, cavities, emitters, and light-matter interfaces.",
+    "color": "#b0643c",
+    "keywords": ["photon", "photonic", "cavity", "squeezing", "interferometer", "optomechanical", "laser", "waveguide"],
+    "phrases": ["quantum optics", "single photon", "photon pair", "light matter interaction", "cavity qed", "quantum photonics"]
+  },
+  {
+    "id": "atomic-molecular-optical",
+    "label": "Atomic, Molecular & Optical Physics",
+    "description": "Atomic and molecular systems, ultracold gases, spectroscopy, clocks, and precision measurement.",
+    "color": "#347958",
+    "keywords": ["atom", "molecule", "ultracold", "spectroscopy", "ion trap", "rydberg", "bose-einstein", "fermi gas", "atomic clock"],
+    "phrases": ["atomic physics", "molecular physics", "optical lattice", "cold atom", "trapped ion", "precision measurement"]
+  },
+  {
+    "id": "condensed-matter",
+    "label": "Condensed Matter & Quantum Materials",
+    "description": "Many-body matter, topological phases, superconductivity, transport, and quantum materials.",
+    "color": "#4d6eb3",
+    "keywords": ["superconduct", "topological", "many-body", "spin liquid", "graphene", "transport", "fermi surface", "magnon", "moire"],
+    "phrases": ["condensed matter", "quantum material", "topological phase", "many body", "strongly correlated", "quantum hall"]
+  },
+  {
+    "id": "fields-particles-gravity",
+    "label": "Fields, Particles & Gravity",
+    "description": "Quantum field theory, particle physics, gravitation, cosmology, and high-energy theory.",
+    "color": "#995b78",
+    "keywords": ["gravity", "cosmology", "holography", "particle", "gauge theory", "black hole", "dark matter", "string theory"],
+    "phrases": ["quantum field theory", "general relativity", "particle physics", "high energy", "standard model"]
+  },
+  {
+    "id": "statistical-complex",
+    "label": "Statistical Physics & Complex Systems",
+    "description": "Nonequilibrium physics, thermodynamics, stochastic systems, networks, and collective behavior.",
+    "color": "#8b7836",
+    "keywords": ["nonequilibrium", "thermodynamic", "stochastic", "entropy production", "phase transition", "criticality", "complex network"],
+    "phrases": ["statistical physics", "complex system", "fluctuation theorem", "collective behavior", "active matter"]
+  },
+  {
+    "id": "other",
+    "label": "Other / Unclassified",
+    "description": "Papers without enough evidence for one of the configured major topics.",
+    "color": "#687485",
+    "keywords": [],
+    "phrases": []
+  }
+]

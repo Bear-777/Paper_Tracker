@@ -1,6 +1,6 @@
 ﻿# Agent Context: Physics Papers Hub
 
-Last updated: 2026-05-12
+Last updated: 2026-06-23
 Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
 
 ## 1) Project Goal
@@ -14,6 +14,8 @@ Public-ready paper aggregation website (Next.js + TypeScript) for physics papers
 - `fast-xml-parser` for XML feeds
 - Server-side Node runtime fetch pipeline
 - In-memory source-level cache
+- Optional Neon/Postgres persistence for source caches, papers, classifications, and refresh history
+- Vercel Cron automation at 00:00 UTC daily
 
 ## 3) Current Implemented Features
 
@@ -56,6 +58,8 @@ Public-ready paper aggregation website (Next.js + TypeScript) for physics papers
     - homepage scroll position is saved separately under `physics-paper-hub-home-scroll-y`
     - returning from Weekly Source Trends or Favorites restores the previous homepage position
   - source status cards + warnings
+  - topic multi-select and shortcuts for Quantum Information, Unclassified, and Low Confidence
+  - topic confidence badges, topic trends, and manual topic corrections
 - Data quality:
   - dedupe priority: DOI > arXiv ID > canonical URL > normalized title fallback
   - stable sort: published desc, source asc, title asc

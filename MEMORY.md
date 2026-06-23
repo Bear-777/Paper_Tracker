@@ -1,10 +1,15 @@
 ﻿# Project Memory: Physics Papers Hub
 
-Last updated: 2026-05-12
+Last updated: 2026-06-23
 Workspace: `D:\Users\Jay\Desktop\Paper_Tracker`
 
 ## Conversation Memory (Latest)
 
+- Added the next major iteration: persistent Postgres storage, daily Vercel Cron refresh, refresh-run history,
+  multi-label topic classification, topic filtering/trends, and manual topic overrides.
+- Production automation is scheduled for `00:00 UTC`, which is `08:00 Asia/Shanghai`.
+- Topic classification uses configurable local rules first and optional OpenAI model review for ambiguous papers.
+- Without `DATABASE_URL`/`POSTGRES_URL`, local development still works in temporary in-memory mode.
 - The project started as a Next.js + TypeScript public paper aggregator for physics papers.
 - You requested robust source-level soft refresh cache semantics to avoid large result fluctuation when some sources fail.
 - We introduced source status visibility (`success`, `stale cache`, `failed no cache`, `partial data`) and clearer warning semantics.

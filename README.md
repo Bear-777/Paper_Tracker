@@ -59,6 +59,13 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
   - `failed no cache`
   - `partial data`
 - Stable dedupe + stable sorting.
+- Persistent Postgres storage when `DATABASE_URL` or `POSTGRES_URL` is configured.
+- Daily Vercel Cron refresh at `00:00 UTC` (`08:00 Asia/Shanghai`).
+- Multi-label topic classification:
+  - configurable rule vocabulary in `topics.json`
+  - optional OpenAI model review for uncertain papers
+  - persisted classifier version, confidence, method, and manual overrides
+- Topic filters, classification confidence badges, topic trends, and manual topic correction.
 
 ## Latest Stability Improvements
 
@@ -155,6 +162,9 @@ Abstract extraction checks:
 
 ```bash
 npm run test:abstract
+npm run test:classification
+# or run all checks
+npm test
 
 # Optional live checks against real arXiv/APS/DOI/example.com pages:
 # PowerShell
@@ -185,6 +195,46 @@ Main vars:
 - `SOURCE_REFRESH_CONCURRENCY`
 - `METADATA_ENRICH_CONCURRENCY`
 - `REFRESH_TOKEN` (optional)
+- `CRON_SECRET` (required for production Cron authentication)
+- `CLASSIFICATION_ADMIN_TOKEN` (manual topic corrections; falls back to `REFRESH_TOKEN`)
+- `DATABASE_URL` or `POSTGRES_URL` (Neon/Postgres connection string)
+- `OPENAI_API_KEY` (optional; enables model review for uncertain classifications)
+- `OPENAI_CLASSIFIER_MODEL` (defaults to `gpt-5-mini`)
+
+## Vercel Deployment and Automation
+
+1. Import the repository into Vercel.
+2. Add a Neon Postgres integration from the Vercel Marketplace, or provide `DATABASE_URL`.
+3. Add `CRON_SECRET`, `REFRESH_TOKEN`, and `CLASSIFICATION_ADMIN_TOKEN`.
+4. Optionally add `OPENAI_API_KEY` for model-assisted classification.
+5. Deploy. The application creates/updates its database tables on first use.
+
+[`vercel.json`](./vercel.json) schedules:
+
+```text
+GET /api/cron/refresh
+0 0 * * *  (daily at 00:00 UTC / 08:00 Asia/Shanghai)
+```
+
+Vercel sends `Authorization: Bearer <CRON_SECRET>` to the Cron route. Normal page visits still perform an
+on-demand refresh when the cache is stale, and the manual Refresh button remains available.
+
+Without a database URL the project deliberately falls back to temporary in-memory storage for local development.
+The UI displays the active storage mode so an accidental non-persistent production setup is visible.
+
+## Topic Classification
+
+The taxonomy and rule vocabulary live in [`topics.json`](./topics.json). Papers can have multiple topics.
+
+1. Strong title/abstract phrase matches are classified locally.
+2. Ambiguous papers are sent to the configured OpenAI model when `OPENAI_API_KEY` is available.
+3. Model failures leave the paper available and mark classification as pending.
+4. Existing classifications with the current classifier version are reused.
+5. Manual topic assignments are stored with `method=manual` and are never overwritten by automatic refreshes.
+
+The initial major topics are Quantum Information, Quantum Computing, Quantum Optics & Photonics, Atomic/Molecular/
+Optical Physics, Condensed Matter & Quantum Materials, Fields/Particles/Gravity, Statistical Physics & Complex
+Systems, and Other / Unclassified.
 
 ## API
 
@@ -197,6 +247,8 @@ Query params:
 - `field=all|title|authors|abstract`
 - `days=7|3|1`
 - `sort=desc|asc`
+- `topic=quantum-information,quantum-optics`
+- `classificationStatus=pending|low_confidence|failed`
 
 Response includes:
 
@@ -215,6 +267,22 @@ Response includes:
 - Failed sources keep stale cache if available.
 - If `REFRESH_TOKEN` is set, call with:
   - `Authorization: Bearer <REFRESH_TOKEN>`
+
+### `GET /api/cron/refresh`
+
+- Used by Vercel Cron for the daily automatic refresh.
+- Requires `Authorization: Bearer <CRON_SECRET>` in production.
+
+### `PUT /api/papers/:paperId/topics`
+
+Body:
+
+```json
+{ "topicIds": ["quantum-information", "quantum-optics"] }
+```
+
+- Saves an authoritative manual override in Postgres.
+- Requires `CLASSIFICATION_ADMIN_TOKEN`, falling back to `REFRESH_TOKEN`.
 
 ## Dedupe and Ordering
 
@@ -251,4 +319,4 @@ Check source status and warning text:
 ## Notes
 
 - This project avoids direct HTML scraping by design.
-- In-memory cache is per running instance. On serverless restarts, cache is rebuilt by next refresh.
+- Postgres is required for durable production data. In-memory mode remains a local-development fallback.

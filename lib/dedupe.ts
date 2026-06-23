@@ -112,7 +112,9 @@ export function dedupePapers(papers: FetchedPaper[]): Paper[] {
   return Array.from(map.entries())
     .map(([key, paper]) => ({
       ...paper,
-      id: buildStableId(key)
+      id: buildStableId(key),
+      topics: [],
+      classificationStatus: "pending" as const
     }))
     .sort((left, right) => {
       const publishedDiff = new Date(right.publishedAt).getTime() - new Date(left.publishedAt).getTime();

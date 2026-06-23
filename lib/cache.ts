@@ -1,11 +1,27 @@
+import crypto from "node:crypto";
+
 import { dedupePapers } from "@/lib/dedupe";
 import { SourceRequestError } from "@/lib/errors";
 import { fetchBySource } from "@/lib/fetchers";
 import { ENABLED_SOURCES } from "@/lib/sources";
 import { cleanAbstractText } from "@/lib/abstract";
+import { classifyPaper } from "@/lib/classifier";
+import {
+  completeRefreshRun,
+  createRefreshRun,
+  isDatabaseConfigured,
+  loadLatestRefreshRun,
+  loadPersistedState,
+  loadStoredClassifications,
+  persistPapers,
+  persistSourceState
+} from "@/lib/database";
+import { CLASSIFIER_VERSION, TOPICS } from "@/lib/topics";
 import type {
   AggregatedResult,
   FetchedPaper,
+  Paper,
+  RefreshRun,
   SourceCacheRecord,
   SourceCacheState,
   SourceConfig,
@@ -31,6 +47,12 @@ const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS ?? 30 * 60 * 1000);
 declare global {
   var __sourceCacheState: SourceCacheState | undefined;
   var __sourceRefreshPromise: Promise<SourceCacheState> | undefined;
+  var __sourceStateLoadPromise: Promise<SourceCacheState> | undefined;
+  var __paperClassifications:
+    | Map<string, Pick<Paper, "topics" | "classificationStatus" | "classifierVersion" | "classifiedAt">>
+    | undefined;
+  var __latestRefreshRun: RefreshRun | undefined;
+  var __activeRefreshRun: RefreshRun | undefined;
 }
 
 function createDefaultSourceRecord(source: SourceConfig): SourceCacheRecord {
@@ -40,7 +62,8 @@ function createDefaultSourceRecord(source: SourceConfig): SourceCacheRecord {
     sourceType: source.type,
     articles: [],
     sourceStatus: "failed_no_cache",
-    usingStaleCache: false
+    usingStaleCache: false,
+    failureStreak: 0
   };
 }
 
@@ -63,6 +86,42 @@ function getState(): SourceCacheState {
   }
 
   return global.__sourceCacheState;
+}
+
+async function ensureStateLoaded(): Promise<SourceCacheState> {
+  if (global.__sourceStateLoadPromise) {
+    return global.__sourceStateLoadPromise;
+  }
+
+  global.__sourceStateLoadPromise = (async () => {
+    if (global.__sourceCacheState?.currentRefreshAttemptAt || !isDatabaseConfigured()) {
+      return getState();
+    }
+
+    try {
+      const persisted = await loadPersistedState();
+
+      if (persisted) {
+        const defaults = createInitialState();
+
+        global.__sourceCacheState = {
+          ...persisted,
+          sources: {
+            ...defaults.sources,
+            ...persisted.sources
+          }
+        };
+      }
+
+      global.__latestRefreshRun = await loadLatestRefreshRun();
+    } catch (error) {
+      console.error("[database-load-error]", error);
+    }
+
+    return getState();
+  })();
+
+  return global.__sourceStateLoadPromise;
 }
 
 function hasUsableCache(record: SourceCacheRecord | undefined): boolean {
@@ -260,6 +319,7 @@ async function refreshSingleSource(
           articles: previous.articles,
           sourceStatus: "stale_cache",
           usingStaleCache: true,
+          failureStreak: previous.failureStreak + 1,
           lastSuccessAt: previous.lastSuccessAt,
           lastError: emptyError
         };
@@ -269,6 +329,7 @@ async function refreshSingleSource(
           articles: [],
           sourceStatus: "success",
           usingStaleCache: false,
+          failureStreak: 0,
           lastSuccessAt: refreshAttemptAt,
           lastError: emptyError
         };
@@ -285,6 +346,7 @@ async function refreshSingleSource(
       articles: sorted,
       sourceStatus: getSourceStatusFromArticles(sorted),
       usingStaleCache: false,
+      failureStreak: 0,
       lastSuccessAt: refreshAttemptAt,
       lastError: undefined
     };
@@ -300,6 +362,7 @@ async function refreshSingleSource(
         articles: previous.articles,
         sourceStatus: "stale_cache",
         usingStaleCache: true,
+        failureStreak: previous.failureStreak + 1,
         lastSuccessAt: previous.lastSuccessAt,
         lastError: errorInfo
       };
@@ -312,6 +375,7 @@ async function refreshSingleSource(
       articles: [],
       sourceStatus: "failed_no_cache",
       usingStaleCache: false,
+      failureStreak: previous.failureStreak + 1,
       lastError: errorInfo
     };
   }
@@ -325,6 +389,7 @@ function toSourceViews(state: SourceCacheState): SourceView[] {
       sourceType: source.sourceType,
       sourceStatus: source.sourceStatus,
       usingStaleCache: source.usingStaleCache,
+      failureStreak: source.failureStreak,
       articleCount: source.articles.length,
       lastSuccessAt: source.lastSuccessAt,
       lastAttemptAt: source.lastAttemptAt,
@@ -386,17 +451,127 @@ function toSourceDailyCounts(state: SourceCacheState): SourceDailyCount[] {
     .sort((left, right) => left.sourceLabel.localeCompare(right.sourceLabel));
 }
 
-function aggregateFromState(state: SourceCacheState): AggregatedResult {
+async function classifyAndPersistPapers(papers: Paper[]): Promise<{ papers: Paper[]; newPaperCount: number }> {
+  const memoryClassifications =
+    global.__paperClassifications ??
+    new Map<string, Pick<Paper, "topics" | "classificationStatus" | "classifierVersion" | "classifiedAt">>();
+  global.__paperClassifications = memoryClassifications;
+  let stored = new Map<
+    string,
+    Pick<Paper, "topics" | "classificationStatus" | "classifierVersion" | "classifiedAt">
+  >();
+
+  try {
+    stored = await loadStoredClassifications(papers.map((paper) => paper.id));
+  } catch (error) {
+    console.error("[classification-load-error]", error);
+  }
+
+  const classified: Paper[] = [];
+
+  for (const paper of papers) {
+    const existing = stored.get(paper.id) ?? memoryClassifications.get(paper.id);
+    const hasManual = existing?.topics.some((topic) => topic.isManual);
+    const isCurrent =
+      existing &&
+      existing.topics.length > 0 &&
+      (hasManual || existing.classifierVersion === CLASSIFIER_VERSION);
+
+    if (isCurrent) {
+      classified.push({
+        ...paper,
+        ...existing
+      });
+      continue;
+    }
+
+    const result = await classifyPaper(paper);
+    const nextPaper: Paper = {
+      ...paper,
+      topics: result.topics,
+      classificationStatus: result.status,
+      classifierVersion: result.classifierVersion,
+      classifiedAt: result.classifiedAt
+    };
+
+    memoryClassifications.set(paper.id, {
+      topics: nextPaper.topics,
+      classificationStatus: nextPaper.classificationStatus,
+      classifierVersion: nextPaper.classifierVersion,
+      classifiedAt: nextPaper.classifiedAt
+    });
+    classified.push(nextPaper);
+  }
+
+  try {
+    return {
+      papers: classified,
+      newPaperCount: await persistPapers(classified)
+    };
+  } catch (error) {
+    console.error("[paper-persistence-error]", error);
+
+    return { papers: classified, newPaperCount: 0 };
+  }
+}
+
+function nextScheduledRefreshAt(): string {
+  const next = new Date();
+
+  next.setUTCHours(24, 0, 0, 0);
+
+  return next.toISOString();
+}
+
+async function finalizeActiveRefresh(papers: Paper[], newPaperCount: number): Promise<void> {
+  const run = global.__activeRefreshRun;
+
+  if (!run) {
+    return;
+  }
+
+  const state = getState();
+  const sourceRecords = Object.values(state.sources);
+  const failureCount = sourceRecords.filter((source) => source.sourceStatus === "failed_no_cache").length;
+  const degradedCount = sourceRecords.filter((source) => source.sourceStatus === "stale_cache").length;
+  const completed: RefreshRun = {
+    ...run,
+    status: failureCount > 0 || degradedCount > 0 ? "partial" : "success",
+    completedAt: new Date().toISOString(),
+    sourceSuccessCount: sourceRecords.length - failureCount - degradedCount,
+    sourceFailureCount: failureCount + degradedCount,
+    paperCount: papers.length,
+    newPaperCount
+  };
+
+  global.__activeRefreshRun = undefined;
+  global.__latestRefreshRun = completed;
+
+  try {
+    await completeRefreshRun(completed);
+  } catch (error) {
+    console.error("[refresh-run-persistence-error]", error);
+  }
+}
+
+async function aggregateFromState(state: SourceCacheState): Promise<AggregatedResult> {
   const allArticles = Object.values(state.sources).flatMap((source) => source.articles);
-  const papers = dedupePapers(allArticles);
+  const deduped = dedupePapers(allArticles);
+  const classified = await classifyAndPersistPapers(deduped);
+
+  await finalizeActiveRefresh(classified.papers, classified.newPaperCount);
 
   return {
-    papers,
+    papers: classified.papers,
     totalBeforeDedupe: allArticles.length,
     sourceViews: toSourceViews(state),
     sourceDailyCounts: toSourceDailyCounts(state),
     currentRefreshAttemptAt: state.currentRefreshAttemptAt,
-    lastSuccessfulRefreshAt: state.lastSuccessfulRefreshAt
+    lastSuccessfulRefreshAt: state.lastSuccessfulRefreshAt,
+    topics: TOPICS,
+    latestRefreshRun: global.__latestRefreshRun,
+    nextScheduledRefreshAt: nextScheduledRefreshAt(),
+    persistenceMode: isDatabaseConfigured() ? "postgres" : "memory"
   };
 }
 
@@ -414,15 +589,36 @@ function shouldAutoRefresh(state: SourceCacheState): boolean {
   return Date.now() - lastSuccessMs > CACHE_TTL_MS;
 }
 
-export async function softRefreshSources(): Promise<SourceCacheState> {
+export async function softRefreshSources(
+  trigger: RefreshRun["trigger"] = "on_demand"
+): Promise<SourceCacheState> {
   if (global.__sourceRefreshPromise) {
     return global.__sourceRefreshPromise;
   }
 
   global.__sourceRefreshPromise = (async () => {
-    const state = getState();
+    const state = await ensureStateLoaded();
     const refreshTimestampMs = Date.now();
     const refreshAttemptAt = new Date(refreshTimestampMs).toISOString();
+    const run: RefreshRun = {
+      id: crypto.randomUUID(),
+      trigger,
+      status: "running",
+      startedAt: refreshAttemptAt,
+      sourceSuccessCount: 0,
+      sourceFailureCount: 0,
+      paperCount: 0,
+      newPaperCount: 0
+    };
+
+    global.__activeRefreshRun = run;
+    global.__latestRefreshRun = run;
+
+    try {
+      await createRefreshRun(run);
+    } catch (error) {
+      console.error("[refresh-run-create-error]", error);
+    }
 
     state.refreshVersion += 1;
     state.currentRefreshAttemptAt = refreshAttemptAt;
@@ -441,8 +637,35 @@ export async function softRefreshSources(): Promise<SourceCacheState> {
 
     global.__sourceCacheState = state;
 
+    try {
+      await persistSourceState(state);
+    } catch (error) {
+      console.error("[source-state-persistence-error]", error);
+    }
+
     return state;
-  })().finally(() => {
+  })().catch(async (error) => {
+    const active = global.__activeRefreshRun;
+
+    if (active) {
+      const failed: RefreshRun = {
+        ...active,
+        status: "failed",
+        completedAt: new Date().toISOString(),
+        errorMessage: error instanceof Error ? error.message : String(error)
+      };
+      global.__activeRefreshRun = undefined;
+      global.__latestRefreshRun = failed;
+
+      try {
+        await completeRefreshRun(failed);
+      } catch (persistenceError) {
+        console.error("[refresh-run-persistence-error]", persistenceError);
+      }
+    }
+
+    throw error;
+  }).finally(() => {
     global.__sourceRefreshPromise = undefined;
   });
 
@@ -450,17 +673,19 @@ export async function softRefreshSources(): Promise<SourceCacheState> {
 }
 
 export async function getAggregatedPapers(): Promise<AggregatedResult> {
-  const state = getState();
+  const state = await ensureStateLoaded();
 
   if (shouldAutoRefresh(state) || !state.currentRefreshAttemptAt) {
-    await softRefreshSources();
+    await softRefreshSources("on_demand");
   }
 
   return aggregateFromState(getState());
 }
 
-export async function refreshAndGetAggregatedPapers(): Promise<AggregatedResult> {
-  await softRefreshSources();
+export async function refreshAndGetAggregatedPapers(
+  trigger: RefreshRun["trigger"] = "manual"
+): Promise<AggregatedResult> {
+  await softRefreshSources(trigger);
 
   return aggregateFromState(getState());
 }
