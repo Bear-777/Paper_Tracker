@@ -1,59 +1,51 @@
 [
   {
+    "id": "indefinite-causal-order",
+    "label": "Indefinite Causal Order & Quantum Switch",
+    "description": "Indefinite or coherently controlled causal order, quantum switches, causal nonseparability, and process-matrix causal inequalities. Ordinary network switches and classical causal inference do not qualify.",
+    "color": "#a13d64",
+    "keywords": ["causal witness", "causal inequality", "process matrix", "process matrices", "causal separability"],
+    "phrases": ["indefinite causal order", "indefinite causal structure", "quantum switch", "causal nonseparability", "causal nonseparable", "causally nonseparable", "superposition of causal orders", "superposition of causal order", "superposition of orders", "quantum control of causal order", "without definite causal order", "without definite causal structure"]
+  },
+  {
+    "id": "quantum-metrology",
+    "label": "Quantum Metrology",
+    "description": "Quantum precision measurement and sensing: quantum parameter estimation, quantum Fisher information, quantum-enhanced clocks, interferometry, magnetometry, and quantum limits to precision. Classical estimation or generic measurement alone does not qualify.",
+    "color": "#536fba",
+    "keywords": ["heisenberg limit", "standard quantum limit", "shot noise limit", "spin squeezing", "cramer rao bound", "magnetometry", "phase estimation", "parameter estimation"],
+    "phrases": ["quantum metrology", "quantum sensing", "quantum sensor", "quantum enhanced sensing", "quantum enhanced measurement", "quantum precision measurement", "quantum parameter estimation", "quantum multiparameter estimation", "quantum fisher information", "quantum cramer rao", "quantum limited measurement", "sub shot noise", "squeezed light interferometry", "quantum magnetometry", "quantum enhanced interferometry"]
+  },
+  {
     "id": "quantum-information",
     "label": "Quantum Information",
     "description": "Quantum information theory, entanglement, communication, cryptography, error correction, and resource theories.",
     "color": "#256f7b",
-    "keywords": ["entanglement", "nonlocality", "cryptography", "teleportation", "coherence", "discord", "fidelity", "channel capacity", "resource theory"],
-    "phrases": ["quantum information", "quantum communication", "quantum network", "quantum key distribution", "quantum error correction", "quantum memory", "quantum channel"]
+    "keywords": ["entanglement", "nonlocality", "teleportation", "quantum discord", "bell inequality", "bell inequalities", "entanglement entropy"],
+    "phrases": ["entanglement", "nonlocality", "bell inequality", "quantum information", "quantum communication", "quantum network", "quantum key distribution", "quantum cryptography", "quantum error correction", "quantum memory", "quantum channel", "quantum resource theory", "resource theory of entanglement", "entanglement distillation", "entanglement assisted", "quantum teleportation", "device independent"]
   },
   {
     "id": "quantum-computing",
     "label": "Quantum Computing",
     "description": "Quantum algorithms, simulation, compilation, architectures, benchmarking, and computing hardware.",
     "color": "#7559a6",
-    "keywords": ["qubit", "gate fidelity", "variational", "annealing", "circuit", "compiler", "benchmarking", "fault-tolerant", "quantum advantage"],
-    "phrases": ["quantum computing", "quantum computer", "quantum algorithm", "quantum simulation", "quantum processor", "quantum circuit"]
+    "keywords": ["qubit", "qudit", "gate fidelity", "fault tolerant", "stabilizer code", "stabiliser code", "logical gate", "quantum advantage"],
+    "phrases": ["quantum computing", "quantum computation", "quantum computational", "quantum computer", "quantum algorithm", "quantum phase estimation algorithm", "quantum simulation", "quantum simulator", "quantum processor", "quantum circuit", "quantum gate", "quantum annealing", "variational quantum", "quantum compilation", "surface code", "fault tolerant quantum"]
   },
   {
     "id": "quantum-optics",
     "label": "Quantum Optics & Photonics",
     "description": "Quantum light, photonic systems, cavities, emitters, and light-matter interfaces.",
     "color": "#b0643c",
-    "keywords": ["photon", "photonic", "cavity", "squeezing", "interferometer", "optomechanical", "laser", "waveguide"],
-    "phrases": ["quantum optics", "single photon", "photon pair", "light matter interaction", "cavity qed", "quantum photonics"]
+    "keywords": ["photon", "photonic", "cavity", "squeezing", "interferometer", "optomechanical", "waveguide"],
+    "phrases": ["quantum optics", "single photon", "photon pair", "light matter interaction", "cavity qed", "quantum photonics", "squeezed light", "photonic quantum", "cavity optomechanics", "photon blockade", "spontaneous parametric down conversion"]
   },
   {
     "id": "atomic-molecular-optical",
     "label": "Atomic, Molecular & Optical Physics",
-    "description": "Atomic and molecular systems, ultracold gases, spectroscopy, clocks, and precision measurement.",
+    "description": "Atomic and molecular systems, ultracold gases, spectroscopy, atomic clocks, and trapped ions. Precision measurement without an atomic or molecular system is not sufficient.",
     "color": "#347958",
-    "keywords": ["atom", "molecule", "ultracold", "spectroscopy", "ion trap", "rydberg", "bose-einstein", "fermi gas", "atomic clock"],
-    "phrases": ["atomic physics", "molecular physics", "optical lattice", "cold atom", "trapped ion", "precision measurement"]
-  },
-  {
-    "id": "condensed-matter",
-    "label": "Condensed Matter & Quantum Materials",
-    "description": "Many-body matter, topological phases, superconductivity, transport, and quantum materials.",
-    "color": "#4d6eb3",
-    "keywords": ["superconduct", "topological", "many-body", "spin liquid", "graphene", "transport", "fermi surface", "magnon", "moire"],
-    "phrases": ["condensed matter", "quantum material", "topological phase", "many body", "strongly correlated", "quantum hall"]
-  },
-  {
-    "id": "fields-particles-gravity",
-    "label": "Fields, Particles & Gravity",
-    "description": "Quantum field theory, particle physics, gravitation, cosmology, and high-energy theory.",
-    "color": "#995b78",
-    "keywords": ["gravity", "cosmology", "holography", "particle", "gauge theory", "black hole", "dark matter", "string theory"],
-    "phrases": ["quantum field theory", "general relativity", "particle physics", "high energy", "standard model"]
-  },
-  {
-    "id": "statistical-complex",
-    "label": "Statistical Physics & Complex Systems",
-    "description": "Nonequilibrium physics, thermodynamics, stochastic systems, networks, and collective behavior.",
-    "color": "#8b7836",
-    "keywords": ["nonequilibrium", "thermodynamic", "stochastic", "entropy production", "phase transition", "criticality", "complex network"],
-    "phrases": ["statistical physics", "complex system", "fluctuation theorem", "collective behavior", "active matter"]
+    "keywords": ["atom", "molecule", "ultracold", "spectroscopy", "rydberg", "bose einstein", "fermi gas"],
+    "phrases": ["atomic physics", "molecular physics", "optical lattice", "cold atom", "trapped ion", "ion trap", "atomic clock", "optical clock", "rydberg atom", "neutral atom", "bose einstein condensate", "ultracold gas"]
   },
   {
     "id": "other",

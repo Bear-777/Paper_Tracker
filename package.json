@@ -8,8 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "test:abstract": "node scripts/check-abstract-extraction.mjs",
-    "test:classification": "node --import tsx --test tests/classifier.test.ts",
-    "test": "npm run test:abstract && npm run test:classification"
+    "test:classification": "node --import tsx --test tests/classifier.test.ts tests/topic-regression.test.ts",
+    "test:sources": "node --import tsx --test tests/sources.test.ts",
+    "test:ui": "node scripts/check-dashboard.mjs",
+    "test": "npm run test:abstract && npm run test:classification && npm run test:sources"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -24,6 +26,7 @@
     "@types/react-dom": "^18.3.0",
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.5",
+    "playwright": "1.61.0",
     "tsx": "^4.22.4",
     "typescript": "^5.5.4"
   },

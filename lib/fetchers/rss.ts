@@ -1,6 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 
-import { pickBestAbstract } from "@/lib/abstract";
+import { cleanAbstractText, pickBestAbstract } from "@/lib/abstract";
 import { SourceRequestError } from "@/lib/errors";
 import { fetchText } from "@/lib/http";
 import type { FetchedPaper, SourceConfig } from "@/lib/types";
@@ -35,6 +35,14 @@ function parseAuthorList(raw: unknown): string[] {
 
 function parseRssItem(item: Record<string, unknown>, source: SourceConfig): FetchedPaper {
   const title = stripHtml(xmlValueToText(item.title));
+  const abstractCandidate = (value: unknown): string => {
+    let text = cleanAbstractText(xmlValueToText(value));
+    // Nature RDF often provides a publication notice plus repeated title, not an abstract.
+    if (text.startsWith(`${source.label}, Published online:`)) {
+      text = text.replace(/^.*?\bdoi:\s*10\.\d{4,9}\/\S+\s*/i, "").trim();
+    }
+    return text.toLowerCase() === title.toLowerCase() ? "" : text;
+  };
   const abstract = pickBestAbstract(
     [
       { strategy: "rss:description", value: item.description },
@@ -43,7 +51,7 @@ function parseRssItem(item: Record<string, unknown>, source: SourceConfig): Fetc
       { strategy: "rss:dc-description", value: item["dc:description"] },
       { strategy: "rss:atom-content", value: item.content },
       { strategy: "rss:prism-teaser", value: item["prism:teaser"] }
-    ],
+    ].map((candidate) => ({ ...candidate, value: abstractCandidate(candidate.value) })),
     "rss:item"
   ).abstract;
   const publishedAt = toIsoDate(
@@ -54,7 +62,10 @@ function parseRssItem(item: Record<string, unknown>, source: SourceConfig): Fetc
   const doi =
     normalizeDoi(xmlValueToText(item["prism:doi"]) || xmlValueToText(item.doi)) ||
     extractDoi(`${title} ${link} ${abstract}`);
-  const authors = parseAuthorList(item["dc:creator"] || item.author);
+  const authorText = item["dc:creator"] || item.author;
+  const authors = source.id === "quantum"
+    ? parseAuthorList(xmlValueToText(authorText).replace(/,\s*(?:and\s+)?/g, ";"))
+    : parseAuthorList(authorText);
 
   return {
     title: title || "Untitled",
@@ -147,6 +158,10 @@ export async function fetchRssPapers(source: SourceConfig): Promise<FetchedPaper
   }
 
   const xml = await fetchText(source.url);
+  return parseRssFeed(xml, source);
+}
+
+export function parseRssFeed(xml: string, source: SourceConfig): FetchedPaper[] {
   let parsed: Record<string, unknown>;
 
   try {
@@ -165,12 +180,12 @@ export async function fetchRssPapers(source: SourceConfig): Promise<FetchedPaper
     .filter((paper): paper is FetchedPaper => paper !== null);
 
   if (rssItems.length > 0) {
-    return rssItems;
+    return rssItems.filter((paper) => !source.articleUrlPrefix || paper.url.startsWith(source.articleUrlPrefix));
   }
 
   const atomEntries = toArray((parsed.feed as Record<string, unknown>)?.entry as unknown[])
     .map((entry) => parseAtomItem(entry as Record<string, unknown>, source))
     .filter((paper): paper is FetchedPaper => paper !== null);
 
-  return atomEntries;
+  return atomEntries.filter((paper) => !source.articleUrlPrefix || paper.url.startsWith(source.articleUrlPrefix));
 }

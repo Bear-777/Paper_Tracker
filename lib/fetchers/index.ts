@@ -372,7 +372,9 @@ export async function fetchBySource(source: SourceConfig, fromDate: string): Pro
     }
 
     if (combined.length > 0) {
-      return enrichMissingMetadataByDoi(source, combined);
+      // Do not spend the serverless request budget enriching older RSS archive entries.
+      const recent = combined.filter((paper) => Date.parse(paper.publishedAt) >= Date.parse(fromDate));
+      return enrichMissingMetadataByDoi(source, recent);
     }
 
     if (rssResult.status === "rejected") {

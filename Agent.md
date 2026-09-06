@@ -100,10 +100,10 @@ From `sources.json`:
 - PRX (APS RSS + Crossref fallback ISSN: `2160-3308`)
 - PRX Quantum (APS RSS + Crossref fallback ISSN: `2691-3399`)
 - Physical Review Research (RSS + Crossref fallback ISSN)
-- Communications Physics (RSS + Crossref fallback ISSN)
+- npj Quantum Information (RSS + Crossref fallback ISSN 2056-6387)
 - Nature Physics (RSS + Crossref fallback ISSN: `1745-2473`)
 - New Journal of Physics (official IOP RSS + Crossref fallback ISSN: `1367-2630`)
-- Journal of Physics A (Crossref)
+- Quantum (RSS + Crossref fallback ISSN 2521-327X)
 
 Important parser detail:
 

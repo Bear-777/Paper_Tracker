@@ -591,14 +591,19 @@ a:hover {
   padding: 0.3rem 0.5rem;
   background: var(--status-item-bg);
   font-size: 0.9rem;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .topic-option input,
 .topic-editor input {
   accent-color: var(--accent);
+  flex-shrink: 0;
 }
 
 .topic-color {
+  flex-shrink: 0;
   width: 0.58rem;
   height: 0.58rem;
   border-radius: 50%;
@@ -616,14 +621,34 @@ a:hover {
   padding: 0.8rem 1rem;
 }
 
-.status-card h2 {
-  margin: 0 0 0.6rem;
+.status-card > summary {
+  cursor: pointer;
+  min-height: 2rem;
+  align-content: center;
+  font-weight: 700;
   font-size: 1rem;
 }
 
+.status-card > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.status-card[open] > summary { margin-bottom: 0.8rem; }
+.status-warning-count {
+  display: inline-block;
+  margin-left: 0.8rem;
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--warning-ink);
+}
+.source-warnings { margin-top: 1rem; overflow-wrap: anywhere; }
+.source-warnings h2 { font-size: 1rem; }
+.source-warnings ul { padding-left: 1.2rem; color: var(--warning-ink); }
+
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: 0.6rem;
 }
 

@@ -5,7 +5,7 @@ import { SourceRequestError } from "@/lib/errors";
 import { fetchBySource } from "@/lib/fetchers";
 import { ENABLED_SOURCES } from "@/lib/sources";
 import { cleanAbstractText } from "@/lib/abstract";
-import { classifyPaper } from "@/lib/classifier";
+import { classifyPaper, reusableClassification } from "@/lib/classifier";
 import {
   completeRefreshRun,
   createRefreshRun,
@@ -16,7 +16,7 @@ import {
   persistPapers,
   persistSourceState
 } from "@/lib/database";
-import { CLASSIFIER_VERSION, TOPICS } from "@/lib/topics";
+import { TOPICS } from "@/lib/topics";
 import type {
   AggregatedResult,
   FetchedPaper,
@@ -80,12 +80,18 @@ function createInitialState(): SourceCacheState {
   };
 }
 
+export function reconcileSourceState(state: SourceCacheState): SourceCacheState {
+  state.sources = Object.fromEntries(ENABLED_SOURCES.map((source) => [source.id,
+    state.sources[source.id] ?? createDefaultSourceRecord(source)]));
+  return state;
+}
+
 function getState(): SourceCacheState {
   if (!global.__sourceCacheState) {
     global.__sourceCacheState = createInitialState();
   }
 
-  return global.__sourceCacheState;
+  return reconcileSourceState(global.__sourceCacheState);
 }
 
 async function ensureStateLoaded(): Promise<SourceCacheState> {
@@ -468,24 +474,22 @@ async function classifyAndPersistPapers(papers: Paper[]): Promise<{ papers: Pape
   }
 
   const classified: Paper[] = [];
+  // Bound semantic review during taxonomy migrations to fit serverless time limits.
+  const modelBudget = { remaining: 8 };
 
   for (const paper of papers) {
     const existing = stored.get(paper.id) ?? memoryClassifications.get(paper.id);
-    const hasManual = existing?.topics.some((topic) => topic.isManual);
-    const isCurrent =
-      existing &&
-      existing.topics.length > 0 &&
-      (hasManual || existing.classifierVersion === CLASSIFIER_VERSION);
+    const current = reusableClassification(paper, existing);
 
-    if (isCurrent) {
+    if (current) {
       classified.push({
         ...paper,
-        ...existing
+        ...current
       });
       continue;
     }
 
-    const result = await classifyPaper(paper);
+    const result = await classifyPaper(paper, modelBudget);
     const nextPaper: Paper = {
       ...paper,
       topics: result.topics,
@@ -576,6 +580,7 @@ async function aggregateFromState(state: SourceCacheState): Promise<AggregatedRe
 }
 
 function shouldAutoRefresh(state: SourceCacheState): boolean {
+  if (ENABLED_SOURCES.some((source) => !state.sources[source.id]?.lastAttemptAt)) return true;
   if (!state.lastSuccessfulRefreshAt) {
     return true;
   }

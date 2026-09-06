@@ -62,11 +62,11 @@
     "enabled": true
   },
   {
-    "id": "communications-physics",
-    "label": "Communications Physics",
+    "id": "npj-quantum-information",
+    "label": "npj Quantum Information",
     "type": "rss",
-    "url": "https://www.nature.com/commsphys.rss",
-    "fallbackCrossrefIssn": "2399-3650",
+    "url": "https://www.nature.com/npjqi.rss",
+    "fallbackCrossrefIssn": "2056-6387",
     "rows": 100,
     "enabled": true
   },
@@ -80,10 +80,12 @@
     "enabled": true
   },
   {
-    "id": "journal-of-physics-a",
-    "label": "Journal of Physics A",
-    "type": "crossref",
-    "issn": "1751-8121",
+    "id": "quantum",
+    "label": "Quantum",
+    "type": "rss",
+    "url": "https://quantum-journal.org/feed/",
+    "articleUrlPrefix": "https://quantum-journal.org/papers/",
+    "fallbackCrossrefIssn": "2521-327X",
     "rows": 100,
     "enabled": true
   }

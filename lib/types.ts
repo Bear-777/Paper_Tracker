@@ -19,6 +19,7 @@ export interface SourceConfig {
   category?: string;
   issn?: string;
   fallbackCrossrefIssn?: string;
+  articleUrlPrefix?: string;
   rows?: number;
 }
 

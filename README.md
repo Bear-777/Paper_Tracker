@@ -21,9 +21,9 @@ A public-ready physics paper aggregation site focused on a consistent UTC 7-day 
   - PRX Quantum
   - Nature Physics
   - Physical Review Research
-  - Communications Physics
+  - npj Quantum Information
   - New Journal of Physics
-  - Journal of Physics A
+  - Quantum
 - Keyword search scope selector:
   - Title + authors + abstract
   - Title only
@@ -171,6 +171,11 @@ npm test
 $env:ABSTRACT_LIVE_TEST='1'; npm run test:abstract; Remove-Item Env:ABSTRACT_LIVE_TEST
 ```
 
+Browser regression (after `npm run build`): `npx playwright install chromium`, then `npm run test:ui`.
+It starts an isolated loopback-only fixture server on port 3107, tests desktop/mobile controls and layouts,
+writes screenshots to `/tmp/paper-tracker-ui`, and stops the fixture server. Override `UI_TEST_PORT` or
+`UI_SCREENSHOT_DIR` as needed. Fixture papers are synthetic; production never loads them.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env.local`.
@@ -229,12 +234,43 @@ The taxonomy and rule vocabulary live in [`topics.json`](./topics.json). Papers 
 1. Strong title/abstract phrase matches are classified locally.
 2. Ambiguous papers are sent to the configured OpenAI model when `OPENAI_API_KEY` is available.
 3. Model failures leave the paper available and mark classification as pending.
-4. Existing classifications with the current classifier version are reused.
+4. Existing classifications are reused only when taxonomy, title, abstract, and model mode match.
 5. Manual topic assignments are stored with `method=manual` and are never overwritten by automatic refreshes.
 
-The initial major topics are Quantum Information, Quantum Computing, Quantum Optics & Photonics, Atomic/Molecular/
-Optical Physics, Condensed Matter & Quantum Materials, Fields/Particles/Gravity, Statistical Physics & Complex
-Systems, and Other / Unclassified.
+The ordered topics are Indefinite Causal Order & Quantum Switch, Quantum Metrology, Quantum Information,
+Quantum Computing, Quantum Optics & Photonics, Atomic/Molecular/Optical Physics, and Other / Unclassified.
+
+Source status is collapsed by default; click or keyboard-toggle its summary to see details and warnings.
+Enabled sources are reconciled against `sources.json` on cache restore. Retired source rows may remain in
+Postgres as history, but are excluded from active feeds, filters, and trends. Newly added sources trigger a refresh.
+Retired topic labels are hidden, including in saved favorites. Active manual labels retain priority; papers with
+only retired labels are reclassified. No manual database migration or clearing of existing papers is required.
+
+### Classification v2
+
+- Whole-word/phrase matching with hyphen, accent and plural normalization replaces substring matching.
+- Titles receive higher weight; nested phrases do not count twice. Each label has an independent evidence
+  threshold, so a strong primary category cannot suppress a valid secondary category.
+- Generic `circuit`, `coherence`, and `fidelity` no longer create labels. Publisher names are not evidence.
+  Nature RSS publication notices are not treated as abstracts; missing abstracts use DOI metadata enrichment.
+- Ambiguous or title-only results use semantic model review when configured. The model gets topic definitions,
+  exclusion criteria and all allowed labels. Malformed responses and unavailable models leave papers pending.
+- Confidence is a heuristic score, **not a calibrated probability**. Missing/very short abstracts cap it below 0.7.
+- A content/configuration fingerprint invalidates old automatic classifications when abstracts are enriched.
+  At most eight model reviews run per aggregation (12-second timeout, no immediate retry). Deferred or failed
+  classifications remain visible and become eligible for retry on later requests after one hour.
+
+This is a precision-oriented rule plus zero-shot semantic classifier, not a trained supervised classifier.
+Common [TF-IDF document classifiers](https://scikit-learn.org/stable/auto_examples/text/plot_document_classification_20newsgroups.html)
+need representative labeled examples. With no expert-labeled corpus yet, configurable rules plus
+[zero-shot multi-label review](https://huggingface.co/tasks/zero-shot-classification) preserve the existing
+low-cost architecture. The regression tests include positive, cross-domain and adversarial synthetic cases;
+their pass rate is not a real-world accuracy claim. Next evaluate 50-100 independently expert-labeled papers,
+report per-topic precision/recall (especially the two new topics), and tune thresholds on a separate split.
+
+The new feeds are [Quantum RSS](https://quantum-journal.org/feed/) (ISSN 2521-327X) and
+[npj Quantum Information RSS](https://www.nature.com/npjqi.rss) (ISSN 2056-6387), both with Crossref fallback.
+Quantum feed entries outside `/papers/` are excluded to avoid treating announcements as research papers.
 
 ## API
 

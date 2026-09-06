@@ -10,6 +10,7 @@ import type {
   TopicDefinition
 } from "@/lib/types";
 import { isWithinUtcDayWindow } from "@/lib/utils";
+import { activePaperTopics } from "@/lib/topics";
 
 type SortOrder = "desc" | "asc";
 type SearchScope = "all" | "title" | "authors" | "abstract";
@@ -77,6 +78,7 @@ interface TrendChartOptions {
   ariaLabel: string;
   sources: SourceDailyCount[];
   colorOffset?: number;
+  topicColors?: boolean;
 }
 
 function formatDate(isoDate: string): string {
@@ -204,8 +206,8 @@ function parseStoredFavorites(raw: string | null): Record<string, Paper> {
         if (typeof paper.id === "string") {
           accumulator[paper.id] = {
             ...paper,
-            topics: Array.isArray(paper.topics) ? paper.topics : [],
-            classificationStatus: paper.classificationStatus ?? "pending"
+            topics: Array.isArray(paper.topics) ? activePaperTopics(paper.topics) : [],
+            classificationStatus: paper.topics?.some((topic) => !activePaperTopics([topic]).length) ? "pending" : paper.classificationStatus ?? "pending"
           };
         }
       }
@@ -543,8 +545,8 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
   ]);
 
   const favoriteList = useMemo(
-    () => Object.values(favoritePapers).sort(sortPapersByDateDesc),
-    [favoritePapers]
+    () => Object.values(favoritePapers).map((paper) => papers.find((current) => current.id === paper.id) ?? paper).sort(sortPapersByDateDesc),
+    [favoritePapers, papers]
   );
 
   const trendDates = useMemo(() => getTrendDates(sourceDailyCounts), [sourceDailyCounts]);
@@ -835,7 +837,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                 key={topic.topicId}
                 className="topic-badge"
                 style={{ borderColor: definition?.color, color: definition?.color }}
-                title={`${Math.round(topic.confidence * 100)}% confidence via ${topic.method}${topic.reason ? `: ${topic.reason}` : ""}`}
+                title={`${Math.round(topic.confidence * 100)}% ${topic.isManual ? "manual assignment" : "heuristic score (not a calibrated probability)"} via ${topic.method}${topic.reason ? `: ${topic.reason}` : ""}`}
               >
                 {topic.topicLabel}
                 <span>{Math.round(topic.confidence * 100)}%</span>
@@ -919,6 +921,9 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
     const xForIndex = (index: number) =>
       padding.left + (trendDates.length <= 1 ? plotWidth / 2 : (plotWidth / (trendDates.length - 1)) * index);
     const yForCount = (count: number) => padding.top + plotHeight - (count / safeMax) * plotHeight;
+    const colorForSource = (sourceId: string, index: number) =>
+      (options.topicColors ? initialTopics.find((topic) => topic.id === sourceId)?.color : undefined) ??
+      TREND_COLORS[(index + colorOffset) % TREND_COLORS.length];
 
     return (
       <section className="card trends-card">
@@ -962,7 +967,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                 ))}
 
                 {trendSources.map((source, sourceIndex) => {
-                  const color = TREND_COLORS[(sourceIndex + colorOffset) % TREND_COLORS.length];
+                  const color = colorForSource(source.sourceId, sourceIndex);
                   const points = source.counts
                     .map((entry, index) => `${xForIndex(index)},${yForCount(entry.count)}`)
                     .join(" ");
@@ -996,7 +1001,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
                 <span key={source.sourceId} className="trend-legend-item">
                   <span
                     className="trend-swatch"
-                    style={{ backgroundColor: TREND_COLORS[(index + colorOffset) % TREND_COLORS.length] }}
+                    style={{ backgroundColor: colorForSource(source.sourceId, index) }}
                   />
                   {source.sourceLabel}
                 </span>
@@ -1050,7 +1055,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
           emptyMessage: "No classified topic data is available in the current window.",
           ariaLabel: "Paper topic 7-day trend chart",
           sources: topicDailyCounts,
-          colorOffset: 2
+          topicColors: true
         })}
       </section>
     );
@@ -1269,8 +1274,13 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
           </fieldset>
         </section>
 
-        <section className="card status-card">
-          <h2>Source status</h2>
+        <details className="card status-card">
+          <summary>
+            Source status
+            {warningSources.length > 0 ? <span className="status-warning-count">
+              {warningSources.length} {warningSources.length === 1 ? "source needs" : "sources need"} attention
+            </span> : null}
+          </summary>
           <div className="status-grid">
             {sourceViews.map((source) => (
               <article
@@ -1289,10 +1299,8 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
               </article>
             ))}
           </div>
-        </section>
-
         {warningSources.length > 0 ? (
-          <section className="card warning-card">
+          <section className="source-warnings">
             <h2>Source warnings</h2>
             <ul>
               {warningSources.map((source) => (
@@ -1304,6 +1312,7 @@ export default function PaperDashboard(props: PaperDashboardProps): JSX.Element 
             </ul>
           </section>
         ) : null}
+        </details>
 
         {filteredPapers.length > 0 ? (
           <section className="paper-list">{filteredPapers.map((paper) => renderPaperCard(paper))}</section>
